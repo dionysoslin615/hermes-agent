@@ -2507,11 +2507,16 @@ _SCRIPT_TIMEOUT = _DEFAULT_SCRIPT_TIMEOUT
 _RUN_CLAIM_HEARTBEAT_SECONDS = 60.0
 
 
-def _get_script_timeout() -> int:
-    """Resolve cron pre-run script timeout from module/env/config with a safe default."""
+def _get_script_timeout() -> Optional[int]:
+    """Resolve cron pre-run script timeout from module/env/config with a safe default.
+
+    A value of 0 means unlimited (``subprocess.run(timeout=None)``).
+    """
     if _SCRIPT_TIMEOUT != _DEFAULT_SCRIPT_TIMEOUT:
         try:
             timeout = int(float(_SCRIPT_TIMEOUT))
+            if timeout == 0:
+                return None
             if timeout > 0:
                 return timeout
         except Exception:
@@ -2521,6 +2526,8 @@ def _get_script_timeout() -> int:
     if env_value:
         try:
             timeout = int(float(env_value))
+            if timeout == 0:
+                return None
             if timeout > 0:
                 return timeout
         except Exception:
@@ -2532,6 +2539,8 @@ def _get_script_timeout() -> int:
         configured = cron_cfg.get("script_timeout_seconds")
         if configured is not None:
             timeout = int(float(configured))
+            if timeout == 0:
+                return None
             if timeout > 0:
                 return timeout
     except Exception as exc:
@@ -2750,6 +2759,8 @@ def _run_job_script(
         return True, stdout
 
     except subprocess.TimeoutExpired:
+        if script_timeout is None:
+            return False, f"Script timed out: {path}"
         return False, f"Script timed out after {script_timeout}s: {path}"
     except Exception as exc:
         return False, f"Script execution failed: {exc}"

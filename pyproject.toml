@@ -320,6 +320,11 @@ youtube = [
   # at first invocation with ModuleNotFoundError (issue #22243).
   "youtube-transcript-api==1.2.4",
 ]
+# PDF skill and production-runner runtime. These are intentionally eager in
+# [all]: bundled PDF scripts and locally scheduled runners execute before the
+# agent lazy-install path is available, so leaving them undeclared makes an
+# exact `uv sync` silently remove a working production dependency.
+pdf = ["fonttools==4.63.0", "pymupdf==1.28.0", "pypdf==6.14.2"]
 # `hermes dashboard` (localhost SPA + API).  Not in core to keep the default install lean.
 # starlette==1.3.1 pinned for CVE-2026-48710 (BadHost) — fastapi pulls Starlette
 # transitively and pre-1.0.1 is the vulnerable range. See the mcp extra above.
@@ -355,6 +360,18 @@ all = [
   "hermes-agent[google]",
   "hermes-agent[web]",
   "hermes-agent[youtube]",
+  "hermes-agent[pdf]",
+]
+
+# This deployment's canonical production environment. Keep opt-in provider
+# packages out of generic [all], but select every backend that a live Gateway,
+# Cron runner, or Kanban worker on this host actually consumes. Rebuild with
+# `uv sync --extra jz-production` so an exact sync cannot silently remove a
+# configured backend while leaving its config and credentials behind.
+jz-production = [
+  "hermes-agent[all,anthropic,dingtalk,exa,fal,firecrawl,messaging,voice]",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.3.0",
 ]
 
 [build-system]

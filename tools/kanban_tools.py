@@ -135,6 +135,36 @@ def _check_kanban_orchestrator_mode() -> bool:
     return _profile_has_kanban_toolset()
 
 
+def _worker_can_create_tasks() -> bool:
+    """Whether dispatcher-spawned workers may create/link follow-up tasks.
+
+    Default is True to preserve upstream Hermes behavior. Worker-only
+    specialist profiles can set ``kanban.worker_can_create_tasks: false`` to
+    keep lifecycle tools while hiding/blocking fan-out tools such as
+    ``kanban_create`` and ``kanban_link``.
+    """
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        val = (cfg.get("kanban") or {}).get("worker_can_create_tasks", True)
+    except Exception:
+        return True
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(val)
+
+
+def _check_kanban_create_mode() -> bool:
+    """Task creation/linking is available to orchestrators and opted-in workers."""
+    if _is_delegated_child_context():
+        return False
+    if os.environ.get("HERMES_KANBAN_TASK") and _is_dispatcher_owned_worker():
+        return _worker_can_create_tasks()
+    return _profile_has_kanban_toolset()
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -1349,6 +1379,12 @@ def _handle_create(args: dict, **kw) -> str:
     delegated_err = _reject_delegated_child_mutation("kanban_create")
     if delegated_err:
         return delegated_err
+    if os.environ.get("HERMES_KANBAN_TASK") and not _worker_can_create_tasks():
+        return tool_error(
+            "kanban_create is disabled for this worker profile "
+            "(kanban.worker_can_create_tasks=false). Hand off the requested "
+            "follow-up in your summary or a kanban_comment instead."
+        )
     title = args.get("title")
     if not title or not str(title).strip():
         return tool_error("title is required")
@@ -1646,6 +1682,12 @@ def _handle_link(args: dict, **kw) -> str:
     delegated_err = _reject_delegated_child_mutation("kanban_link")
     if delegated_err:
         return delegated_err
+    if os.environ.get("HERMES_KANBAN_TASK") and not _worker_can_create_tasks():
+        return tool_error(
+            "kanban_link is disabled for this worker profile "
+            "(kanban.worker_can_create_tasks=false). Hand off dependency "
+            "changes to the calling/orchestrator profile instead."
+        )
     parent_id = args.get("parent_id")
     child_id = args.get("child_id")
     if not parent_id or not child_id:
@@ -2457,7 +2499,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_CREATE_SCHEMA,
     handler=_handle_create,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_create_mode,
     emoji="➕",
 )
 
@@ -2475,6 +2517,6 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_LINK_SCHEMA,
     handler=_handle_link,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_create_mode,
     emoji="🔗",
 )

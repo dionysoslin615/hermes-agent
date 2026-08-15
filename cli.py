@@ -1335,10 +1335,23 @@ def _notify_single_query_session_finalize(cli, *, reason: str = "shutdown") -> N
         _single_query_finalize_attempted_session_ids.add(session_id)
 
 
+def _end_single_query_session(cli, *, reason: str = "cli_close") -> None:
+    """Persist the final session tip's terminal state for one-shot CLI runs."""
+    agent = getattr(cli, "agent", None)
+    session_id = getattr(agent, "session_id", None) or getattr(cli, "session_id", None)
+    session_db = getattr(cli, "_session_db", None)
+    if session_db is not None and session_id:
+        session_db.end_session(session_id, reason)
+
+
 def _finalize_single_query(cli) -> None:
     """Close one-shot CLI resources before releasing the active session lease."""
     try:
         _notify_single_query_session_finalize(cli)
+        try:
+            _end_single_query_session(cli)
+        except Exception:
+            logger.warning("Failed to end one-shot CLI session", exc_info=True)
         _run_cleanup(notify_session_finalize=False)
     finally:
         cli._release_active_session()
