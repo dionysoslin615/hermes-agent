@@ -26,6 +26,7 @@ This is an executable operating contract, not a narrative. An upgrade is not com
 The closed production topology contains:
 
 - **one canonical Python environment** for Hermes and Hermes-owned Python services;
+- **one explicitly governed Browser Use tool environment** only when the upstream Browser Use CLI's exact dependency pins and stdin protocol cannot coexist with the canonical Hermes environment; this is a tool-isolation exception, not permission for Profile/service-local venvs;
 - **one Node executable/toolchain** for Hermes-owned Node consumers;
 - **one centrally governed browser-runtime root**, containing exactly one approved Chrome/Chromium binary and one approved Lightpanda binary when both engines are required;
 - multiple browser processes are allowed only to provide the required Profile/task isolation, but every process must execute the approved central binary;
@@ -59,7 +60,7 @@ Runtime PATH for Cron/Kanban/browser workers must expose approved fixed launcher
 - Interactive Profiles may use their assigned long-lived CDP endpoints.
 - Every browser-using Cron or Kanban run receives a clean run-specific HOME/profile/user-data directory and a free loopback port allocated through the central lease mechanism.
 - Port reuse by convention or arithmetic is forbidden. Allocation must avoid time-of-check/time-of-use races and record owner, PID/PGID, engine, port, start time and lease path.
-- Chrome and Lightpanda are engines under one central runtime root; Browser Use is the official CLI/client in the one canonical Python environment and connects to the allocated CDP endpoint.
+- Chrome and Lightpanda are engines under one central runtime root; Browser Use is the official CLI/client in its governed tool environment when the canonical dependency/CLI compatibility proof requires that exception, and connects only to the allocated CDP endpoint.
 - Browser Use must follow the upstream Hermes integration contract: `browser-use` CLI plus `BU_CDP_URL` or `BU_CDP_WS`; production must not fall through to Hermes' `uvx browser-use` convenience path.
 - Lightpanda is preferred where the workload passes its compatibility decision; Chrome is the explicit fallback for unsupported sites/features. Fallback uses the same central binary and lease contract, not an additional download.
 - Cleanup must terminate the complete process group, release the lease, remove run-specific browser state, and prove no listener/PID remains.
@@ -192,22 +193,32 @@ The final canonical environment is `~/.hermes/hermes-agent/venv`, using Python 3
 5. Produce a hash-locked manifest; do not modify upstream `pyproject.toml` or `uv.lock` for local service packages.
 6. Build one temporary candidate environment with Python downloads disabled.
 7. Synchronize from the hash lock; no unpinned residual package may survive.
-8. Run `pip check` equivalent, import checks and real smoke tests for Hermes, PDF/OCR/Office, OSS, RAG, MiniMax MCP, PPT Master, STT/TTS, Browser Use and every other consumer.
-9. If package constraints conflict, stop. Do not hide a second venv.
+8. Run `pip check` equivalent, import checks and real smoke tests for Hermes, PDF/OCR/Office, OSS, RAG, MiniMax MCP, PPT Master, STT/TTS and every other canonical consumer.
+9. Resolve Browser Use separately: first test every officially compatible CLI release in the canonical resolver and then run Hermes' real `browser_exec` stdin protocol. If dependencies resolve but the protocol does not execute, that version is incompatible. If the upstream-working version has irreconcilable exact pins, a separately hash-locked Browser Use tool environment is allowed only after explicit owner approval and must be the sole non-Coder exception.
 10. At cutover, archive the old environment as a non-executable compressed rollback artifact, atomically place the new canonical environment, remap consumers, verify, then remove every non-exempt executable environment.
 
 ### 5.4 Browser Use placement
 
-Browser Use is installed in the canonical Hermes Python environment, not in a separate venv and not in system `/usr/bin/python3`. Its exact version and dependency hashes belong in the external canonical lock. The `browser-use` console script must resolve to `~/.hermes/hermes-agent/venv/bin/browser-use` for Gateway, Cron and Kanban contexts.
+The preferred state is canonical co-installation, but it is accepted only after both dependency resolution and Hermes' real stdin-CLI protocol pass. For v2026.8.13, Browser Use 0.11.13 resolved with Hermes but did not execute `browser_exec` code; Browser Use 0.13.7 plus Browser Harness 0.1.8 executed the official protocol but carried exact dependency pins incompatible with Hermes 0.20.1. The owner therefore approved one separately governed tool environment at `~/.hermes/services/browser-runtime/python/browser-use/0.13.7/venv`.
 
-Before production use, verify from official source/documentation:
+The exception must satisfy all of the following:
 
-- installed distribution/version;
-- console-script entry point;
-- Hermes' exact command construction;
-- CDP environment variable precedence;
-- no executable path reaches `uvx` fallback;
-- no Playwright/browser binary was downloaded during package synchronization.
+- exact input and hash lock beside the environment;
+- fixed launcher `~/.hermes/services/browser-runtime/bin/browser-use`;
+- systemd/automation preflight verifies the launcher, versions and hashes before work;
+- production PATH resolves that launcher before `uvx`; missing/mismatched runtime fails closed;
+- the tool environment contains no Profile/service business packages and is never cloned per Profile/task;
+- all Profiles and tasks connect to their own CDP endpoint and workspace; the tool environment itself stores no shared browser user-data profile;
+- any future Browser Use release is retried in the canonical resolver and this exception is retired immediately if dependency and protocol tests both pass.
+
+Before production use, verify from official source/documentation and real execution:
+
+- installed Browser Use/Browser Harness distributions and console entry point;
+- Hermes `browser_exec` can execute `page_info()` rather than returning help text;
+- `BU_CDP_URL` / `BU_CDP_WS` routing reaches the intended Profile/task browser;
+- seven Profile HERMES_HOME values yield seven distinct workspaces;
+- no executable path reaches `uvx` fallback and no browser download occurs; and
+- CLI/helper behavior required by upstream `tools/browser_use_cli.py` is present.
 
 ---
 
@@ -235,11 +246,12 @@ Use one formal root under `~/.hermes/services/browser-runtime/` with:
 - `bin/` — fixed, checked launchers;
 - `chrome/<version>/` — the single approved Chrome/Chromium executable;
 - `lightpanda/<version>/` — the single approved Lightpanda executable;
+- `python/browser-use/<version>/` — the single approved Browser Use tool environment only when the governed exception is active;
 - `manifests/` — source URL, release, size, SHA-256 and verification records;
 - `leases/` — runtime ownership records;
 - `runs/` — ephemeral per-run HOME/user-data/state, removed after use.
 
-Browser Use itself remains in the canonical Python environment. There is no Browser Use venv inside this root.
+Browser Use belongs in this root only when the dependency-and-protocol proof activates the single governed tool-environment exception. It is never installed per Profile or per task.
 
 ### 7.2 Installation
 
@@ -415,8 +427,8 @@ Before declaring completion:
 
 ### Browser staging error
 
-- Browser Use 0.13.7 plus browser-harness 0.1.8 was initially placed in a separate temporary venv. Lightpanda 0.3.6 was placed as a temporary binary.
-- This architecture was rejected because the final system must have one canonical Python environment; Browser Use will be merged into it and the temporary venv removed.
+- Browser Use 0.13.7 plus Browser Harness 0.1.8 was initially placed in a temporary tool venv; Lightpanda 0.3.6 was placed as a temporary binary.
+- Canonical co-installation was then tested rather than assumed. Browser Use 0.11.13 resolved with Hermes but returned CLI help instead of executing Hermes stdin code. The upstream-working 0.13.7/0.1.8 pair had irreconcilable exact pins. After explicit owner approval, one hash-locked governed Browser Use tool environment was promoted under the central browser-runtime root; all Profile/task copies remain forbidden.
 - A naked Lightpanda `--help` probe hung until Hermes idle recovery. The command had not been confirmed from official documentation and lacked the mandatory safe-probe wrapper. This was an execution-discipline failure, not a production Gateway crash. Seven Gateways remained active with no restart; no browser/runtime service was switched.
 
 ### Source-retirement corrections
@@ -427,15 +439,25 @@ Before declaring completion:
 - Final intended runtime source surface is seven files; governance and local regression files are tracked separately.
 - The first reduced-candidate retained-patch run exposed an incomplete LP-011 migration: DingTalk `_get_access_token` still depended exclusively on an already-connected Stream client, so proactive/independent `sampleAudio` could not acquire a token from the official `client_id/client_secret` configuration. The existing OAuth fallback was restored as the smallest semantic hunk. The next retained-patch run completed with 158 passed, 1 skipped and 0 failed; the skipped condition must be rechecked in the canonical environment.
 
-### Open items before this document can be marked final
+### Environment, configuration and service conservation completed before cutover
 
-- complete package-conflict and consumer migration matrix for all non-exempt Python environments;
-- establish and validate canonical combined hash lock;
-- complete Node executable/toolchain inventory and consolidation;
-- install/verify formal Lightpanda and Browser Use using official commands;
-- complete Browser Use/Lightpanda decision matrix and random-port lease integration;
-- adapt and shadow-test every browser Cron/Kanban path;
-- rerun reduced-candidate tests;
-- staged seven-Profile production cutover and real business validation;
-- remove all redundant runtimes and temporary artifacts;
-- append exact final commit, versions, hashes, run ids/results and closeout readback.
+- Whole-Hermes path census covered 102,409 directories and 551,581 files (about 85.2 GB). It found 17 `pyvenv.cfg` environments, 188 `node_modules` directories and 113 runtime-executable candidates. A second pass streamed 23.97 GB of large files; unreadable large files were limited to Coder-project MySQL binlogs under the explicit exception. No active Hermes config/script/Skill/service file was unreadable.
+- Formal configuration registry covered 6,620 objects including all named-Profile Skills. Fifty legacy-path references were identified; immutable historical evidence was classified separately and all active references entered the cutover tree.
+- Canonical Python 3.11.15 environment resolved and installed 245 compatible packages with a hash lock. `pip check` passed. Hermes local/upstream regression set passed 286 tests with one Windows-only skip. Real DOCX/XLSX/PPTX/PDF creation/readback passed; CUDA reported `torch 2.12.0+cu126` on NVIDIA L20.
+- Canonical MCP protocol smokes passed for OSS (including real `oss_health`), RAG (17 tools and four green SQLite/Qdrant collections with no missing points), and MiniMax. Seven Profile configs contained 17 MCP bindings; all 17 initialized and listed tools using each Profile's actual config and interpolation syntax.
+- Lightpanda 0.3.6 official release hash `e438c0ad44e0f6b8d4289b05b16eb84761f825a8d866be2f6dc01f1f58652d6` matched and the official `serve --host 127.0.0.1 --port <random>` command listened and cleaned its process group, port and temporary HOME. Chrome 151.0.7922.34 hash `0b20b130e7edd9dd51873be867761295fe0cfad490c2b9a64f95bd3cfc08fa71` was copied byte-for-byte into the central root.
+- Browser Use 0.13.7 / Browser Harness 0.1.8 executed Hermes `browser_exec(page_info())` against all seven fixed Profile CDP endpoints. All seven calls had success/exit-code zero, seven distinct HERMES_HOME workspaces and unchanged browser PIDs.
+- All 16 Cron definitions were inventoried: 15 enabled at entry and `tender-intelligence` intentionally disabled. Before cutover, the 15 enabled jobs were paused through the official CLI. The active IPO DLOM runner received SIGTERM, exited cleanly and retained audit 632 at the resumable `round2_running` checkpoint with an expired lease and reviewer `-15` receipt; the database was not hand-edited.
+- Formal Kanban boards contained no active workers at the cutover gate. Internal Journal had 86 done/archived cards; MA Detail had 295 cards with no running/claimed task.
+- A shared Crawler browser contract now governs the central Chrome entry, reserved fixed ports 9222-9228 and no-download environment. Focused browser regressions passed 87 tests. Tender self-test and real browser smoke passed; its random port/profile were removed and seven fixed browser PIDs remained unchanged. PPT visual review was changed from installer advice to fail-closed reporting.
+
+### Remaining items before this document can be marked final
+
+- finish Node consumer/dependency-tree conservation and prove the one approved Node executable after cutover;
+- apply the verified source, canonical venv and cutover asset tree atomically;
+- run all tests again from formal production paths (including tests whose staging harness hardcodes production roots);
+- restart in controlled Profile order and verify seven Profile messages, models, fallbacks, TTS/STT, tools, 17 MCP bindings and Browser Use;
+- resume the original 15 Cron jobs only after task-level validation; keep `tender-intelligence` disabled;
+- run real Cron/Kanban business validations, including DLOM checkpoint recovery, and read back publications/deliveries/cleanup;
+- remove all obsolete service/temp/cache venvs, old Playwright browser trees and temporary mirrors; restore locked Skill permissions;
+- append final deployed commit, exact service/runtime readback, validation results and rollback locations.
