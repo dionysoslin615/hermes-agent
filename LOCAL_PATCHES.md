@@ -13,8 +13,9 @@ Only these runtime files may differ from the upstream baseline:
 3. `agent/agent_init.py`
 4. `tools/kanban_tools.py`
 5. `hermes_cli/kanban_db.py`
-6. `cli.py`
-7. `plugins/platforms/dingtalk/adapter.py`
+6. `tools/browser_use_cli.py`
+7. `cli.py`
+8. `plugins/platforms/dingtalk/adapter.py`
 
 Governance-only files may also differ:
 
@@ -27,8 +28,10 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/cli/test_single_query_session_finalize.py`
 - `tests/cron/test_cron_script.py`
 - `tests/gateway/test_dingtalk.py`
+- `tests/hermes_cli/test_kanban_core_functionality.py`
 - `tests/hermes_cli/test_kanban_skill_readonly_sandbox.py`
 - `tests/hermes_cli/test_kanban_worker_spawn_toolsets.py`
+- `tests/tools/test_browser_use_cli.py`
 - `tests/tools/test_cloud_voice_integration.py` (DingTalk-only despite the historical filename)
 - `tests/tools/test_kanban_tools.py`
 
@@ -173,6 +176,27 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Upstream evidence:** `create_task` records both `created` and `blocked(reason=initial_status)` transactionally.
 - **Validation:** official-target sticky-block regression included in the 164-test suite.
 - **Rule:** never port the old local implementation.
+
+## LP-017 — unattended Browser Use run-owned Chrome lease
+
+- **Status:** ACTIVE-SOURCE.
+- **File / symbols:** `tools/browser_use_cli.py`, unattended-worker detection, governed CLI resolution, run-owned Chrome lease and daemon-safe CLI execution.
+- **Production invariant:** a Cron/Kanban worker that calls `browser_exec` without a pre-launched CDP receives one task-private central Chrome on an OS-assigned loopback port, with PAC routing, four no-download guards, a short Browser Harness runtime path, and complete daemon/process/profile cleanup. Interactive Browser Use keeps upstream defaults.
+- **Upstream 0.20.1:** Browser Harness expects an already running Chrome; when the CLI is not on the worker's scrubbed PATH, `_find_cli` falls through to `uvx browser-use`; `subprocess.run(capture_output=True)` can wait forever when the persistent Harness daemon inherits its pipes.
+- **Why alternatives fail:** persistent Profile CDP services violate task isolation; `BH_CHROME_PATH` launches a shared/default Chrome profile and cannot express the existing PAC/task lease; per-Runner duplication leaves generic Kanban and future Cron consumers uncovered; changing HOME breaks Profile credentials and provider state.
+- **Minimal delta:** activate only for `HERMES_KANBAN_TASK` or explicit `HERMES_RUN_OWNED_BROWSER=1`; always prefer an existing CDP; resolve the one shared governed Browser Use launcher and prohibit unattended uvx fallback; start central Chrome with `--remote-debugging-port=0`; bridge to `BU_CDP_URL`; use temp files instead of stdout/stderr pipes; clean by atexit and parent-death binding.
+- **Validation:** Browser Use regressions 89/89 and browser runtime regressions 500/500; a real Kanban card completed with title/text/url readback, managed CLI, no uvx, random port, PAC, four guards and zero cache delta; competitor-info's real `call_agent` returned the same browser result and removed its isolated runtime.
+- **Retirement trigger:** upstream Browser Use natively launches a task/profile-private headless Chrome with random CDP, supports governed executable/PAC routing, fails closed instead of uvx in unattended sessions, and owns complete daemon/browser cleanup.
+
+## LP-018 — Kanban timeout terminates the worker process group
+
+- **Status:** ACTIVE-SOURCE.
+- **File / symbol:** `hermes_cli/kanban_db.py::enforce_max_runtime`.
+- **Production invariant:** max-runtime enforcement terminates the entire worker session, including Bubblewrap children, Browser Harness daemon and task-owned Chrome, before releasing the claim or recording timeout.
+- **Upstream 0.20.1:** `_default_spawn` uses `start_new_session=True`, but timeout enforcement signals only the recorded leader PID and treats leader exit as complete; live descendants and browser listeners remain orphaned.
+- **Minimal delta:** on POSIX, verify `os.getpgid(pid) == pid`, signal that PGID, poll group existence, then escalate the same group to SIGKILL; preserve the injected single-PID signal hook and Windows behavior.
+- **Validation:** dedicated group-liveness regression plus Kanban core 25/25; real timeout reproduced the orphan before the patch, and a task-owned Chrome was then proven to share the worker PGID. Manual test residue was removed before proceeding.
+- **Retirement trigger:** upstream timeout/reclaim owns process-tree or cgroup termination and proves no descendants/listeners survive.
 
 ---
 

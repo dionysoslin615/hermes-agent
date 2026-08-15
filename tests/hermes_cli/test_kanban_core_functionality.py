@@ -314,6 +314,59 @@ def test_max_runtime_terminates_overrun_worker(kanban_home):
         _kb._pid_alive = original_alive
 
 
+def test_max_runtime_terminates_entire_posix_worker_group(kanban_home, monkeypatch):
+    import signal
+
+    if os.name == "nt":
+        pytest.skip("POSIX process groups only")
+    import hermes_cli.kanban_db as _kb
+
+    signals = []
+    state = {"alive": True}
+
+    def fake_killpg(pgid, sig):
+        signals.append((pgid, sig))
+        if sig == getattr(signal, "SIGKILL", signal.SIGTERM):
+            state["alive"] = False
+            return
+        if sig == 0 and not state["alive"]:
+            raise ProcessLookupError
+
+    monkeypatch.setattr(_kb.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(_kb.os, "killpg", fake_killpg)
+    monkeypatch.setattr(_kb.time, "sleep", lambda _seconds: None)
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(
+            conn, title="grouped long job", assignee="worker",
+            max_runtime_seconds=1,
+        )
+        kb.claim_task(conn, tid)
+        worker_pid = 424242
+        kb._set_worker_pid(conn, tid, worker_pid)
+        old_started = int(time.time()) - 30
+        with kb.write_txn(conn):
+            conn.execute(
+                "UPDATE tasks SET started_at = ? WHERE id = ?",
+                (old_started, tid),
+            )
+            conn.execute(
+                "UPDATE task_runs SET started_at = ? "
+                "WHERE id = (SELECT current_run_id FROM tasks WHERE id = ?)",
+                (old_started, tid),
+            )
+
+        assert tid in kb.enforce_max_runtime(conn)
+        non_probe = [(pgid, sig) for pgid, sig in signals if sig != 0]
+        assert non_probe[0] == (worker_pid, signal.SIGTERM)
+        assert non_probe[-1] == (
+            worker_pid, getattr(signal, "SIGKILL", signal.SIGTERM)
+        )
+        assert all(pgid == worker_pid for pgid, _sig in signals)
+    finally:
+        conn.close()
+
 
 
 

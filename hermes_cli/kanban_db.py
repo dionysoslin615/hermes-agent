@@ -8337,13 +8337,32 @@ def enforce_max_runtime(
 
         pid = int(row["worker_pid"])
         tid = row["id"]
-        # SIGTERM then SIGKILL. Keep it simple: 5 s grace. Workers that
-        # want a cleaner shutdown can install their own SIGTERM handler
-        # before the grace expires.
+        # SIGTERM then SIGKILL. Workers are spawned with start_new_session=True,
+        # so on POSIX the recorded PID is also the worker process-group id.
+        # Signal the whole group: killing only the session leader strands
+        # Bubblewrap children, Browser Use daemons and task-owned Chrome.
         killed = False
+        group_mode = False
         kill = signal_fn if signal_fn is not None else (
             os.kill if hasattr(os, "kill") else None
         )
+        if signal_fn is None and os.name != "nt" and hasattr(os, "killpg"):
+            try:
+                if os.getpgid(pid) == pid:
+                    kill = os.killpg
+                    group_mode = True
+            except (ProcessLookupError, OSError):
+                pass
+
+        def _worker_alive() -> bool:
+            if not group_mode:
+                return _pid_alive(pid)
+            try:
+                os.killpg(pid, 0)
+                return True
+            except (ProcessLookupError, OSError):
+                return False
+
         if kill is not None:
             try:
                 kill(pid, signal.SIGTERM)
@@ -8351,10 +8370,10 @@ def enforce_max_runtime(
                 pass
             # Short polling wait — no time.sleep on the write txn.
             for _ in range(10):
-                if not _pid_alive(pid):
+                if not _worker_alive():
                     break
                 time.sleep(0.5)
-            if _pid_alive(pid):
+            if _worker_alive():
                 try:
                     # signal.SIGKILL doesn't exist on Windows.
                     _sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)

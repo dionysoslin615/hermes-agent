@@ -57,13 +57,13 @@ Runtime PATH for Cron/Kanban/browser workers must expose approved fixed launcher
 
 ### 1.4 Browser allocation contract
 
-- Interactive Profiles may use their assigned long-lived CDP endpoints.
-- Every browser-using Cron or Kanban run receives a clean run-specific HOME/profile/user-data directory and a free loopback port allocated through the central lease mechanism.
-- Port reuse by convention or arithmetic is forbidden. Allocation must avoid time-of-check/time-of-use races and record owner, PID/PGID, engine, port, start time and lease path.
-- Chrome and Lightpanda are engines under one central runtime root; Browser Use is the official CLI/client in its governed tool environment when the canonical dependency/CLI compatibility proof requires that exception, and connects only to the allocated CDP endpoint.
-- Browser Use must follow the upstream Hermes integration contract: `browser-use` CLI plus `BU_CDP_URL` or `BU_CDP_WS`; production must not fall through to Hermes' `uvx browser-use` convenience path.
-- Lightpanda is preferred where the workload passes its compatibility decision; Chrome is the explicit fallback for unsupported sites/features. Fallback uses the same central binary and lease contract, not an additional download.
-- Cleanup must terminate the complete process group, release the lease, remove run-specific browser state, and prove no listener/PID remains.
+- Interactive Profiles keep the Hermes official browser defaults: `browser.backend` unset, `browser.engine: auto`, and no persistent `browser.cdp_url`. When the governed Browser Use CLI is runnable, Hermes exposes the official `browser_exec` path; it falls back to the built-in browser stack only when that CLI is unavailable or the backend is explicitly disabled.
+- Lightpanda is an installed optional engine of Hermes' built-in browser stack, not a transparent Browser Use backend. Built-in Lightpanda mode may fall back to Chrome for unsupported operations; Browser Use itself must not be described as automatically migrating a live Lightpanda session to Chrome.
+- Every browser-using Cron or Kanban run receives a clean run-specific HOME/profile/user-data directory and an OS-assigned loopback CDP port (`--remote-debugging-port=0`) recorded in the task lease.
+- Port reuse by convention, arithmetic, or pre-binding is forbidden. The Runner must read `DevToolsActivePort`, bind the endpoint to owner PID/PGID and profile identity, and reject reserved historical Profile ports 9222-9228.
+- Chrome and Lightpanda are approved engines under one central runtime root. Browser Use is the official CLI/client in its governed tool environment and receives task-owned CDP routing through Hermes' supported `BROWSER_CDP_URL` → `BU_CDP_URL`/`BU_CDP_WS` bridge.
+- Production PATH must resolve the fixed governed Browser Use launcher and must not fall through to Hermes' `uvx browser-use` convenience path.
+- Cleanup must terminate the complete task process group, stop the matching Browser Harness daemon through its official reload entrypoint, release the lease, remove run-specific browser state, and prove no listener/PID remains.
 
 ### 1.5 Verification contract
 
@@ -160,7 +160,7 @@ Rollback materials must be read back before proceeding. A path existing is not p
 7. Run focused regressions and the relevant full suites in an isolated test home with Node/browser downloads disabled.
 8. Run an `env -i` clean-process CLI/import identity check.
 
-For the v2026.8.13 upgrade, LP-010, LP-013, LP-014 and LP-016 were proven upstream-absorbed with 164 official-target tests passing. LP-007 and LP-008 were retired through deployment alternatives. The allowed runtime source surface was reduced to seven files listed in `LOCAL_PATCHES.md`.
+For the v2026.8.13 upgrade, LP-010, LP-013, LP-014 and LP-016 were proven upstream-absorbed with 164 official-target tests passing. LP-007 and LP-008 were retired through deployment alternatives. Final unattended-browser validation added LP-017 and LP-018 after untouched upstream reproduced a Browser Harness `chrome-not-running`/`uvx` escape and Kanban timeout orphaning; the allowed runtime source surface is eight files listed in `LOCAL_PATCHES.md`.
 
 ---
 
@@ -208,7 +208,7 @@ The exception must satisfy all of the following:
 - systemd/automation preflight verifies the launcher, versions and hashes before work;
 - production PATH resolves that launcher before `uvx`; missing/mismatched runtime fails closed;
 - the tool environment contains no Profile/service business packages and is never cloned per Profile/task;
-- all Profiles and tasks connect to their own CDP endpoint and workspace; the tool environment itself stores no shared browser user-data profile;
+- interactive Profiles use Hermes' official default Browser Use resolution with Profile-scoped workspaces and no persistent CDP override; task Runners connect Browser Use only to the current run-owned random CDP endpoint; the tool environment itself stores no shared browser user-data profile;
 - any future Browser Use release is retried in the canonical resolver and this exception is retired immediately if dependency and protocol tests both pass.
 
 Before production use, verify from official source/documentation and real execution:
@@ -264,11 +264,11 @@ Browser Use belongs in this root only when the dependency-and-protocol proof act
 
 ### 7.3 Engine decision
 
-Lightpanda is preferred only for workloads that pass a real compatibility probe: navigation, JavaScript, required DOM/API behavior, authentication/session handling, downloads/uploads if used, and clean CDP closure. Chrome remains the documented fallback for unsupported workloads. The decision is per workload class, not based on one successful `example.com` navigation.
+The Profile default is the official Browser Use driver with `browser.engine: auto`; official docs define `auto` as agent-browser's current Chrome default. Lightpanda is installed but is not the default engine: it is selected only by the explicit official setting `browser.engine: lightpanda` on the built-in agent-browser path. Only that built-in Lightpanda path provides transparent Chrome retry for eligible failures and unsupported actions; Browser Use is not a Lightpanda-to-Chrome migration layer.
 
-### 7.4 Fixed Profile browsers
+### 7.4 Official default Profile browsers
 
-Seven formal Profiles retain isolated long-lived CDP processes and user-data roots where their interactive behavior requires persistence. They all execute the one central Chrome/Lightpanda binary. Profile-to-port mapping is configuration and must be backed up and preserved; the crawler's actual fixed endpoint must agree across config, service unit and task rejection rules.
+Seven formal Profiles keep `browser.backend` unset, `browser.engine: auto`, and no persistent `browser.cdp_url`. The governed Browser Use CLI is resolved from the central runtime root, so Hermes follows its official default tool-selection path. Profile-fixed CDP services and 9222-9228 mappings are local drift and must remain disabled/absent after migration.
 
 ### 7.5 Random Cron/Kanban browsers
 
@@ -276,10 +276,10 @@ Every browser-using job/board launcher must:
 
 1. run a preflight that validates fixed launcher, package version and binary hash without installation;
 2. create a private run root and HOME;
-3. allocate a loopback port through a race-safe lease;
+3. request an OS-assigned loopback port with `--remote-debugging-port=0`, then read and validate `DevToolsActivePort` before marking the lease ready;
 4. start a new process group using the selected central engine;
 5. wait for a bounded CDP readiness check;
-6. export only that run's `BROWSER_CDP_URL`, `BU_CDP_URL` or `BU_CDP_WS` to the worker;
+6. export only that run's `BROWSER_CDP_URL` to the Hermes worker and let the official Browser Use adapter translate it to `BU_CDP_URL` or `BU_CDP_WS`;
 7. run the business task with installer paths unavailable and lazy installs disabled;
 8. validate the actual business artifact/result;
 9. terminate the process group, verify listener disappearance, release lease and delete ephemeral state;
@@ -364,7 +364,7 @@ For default, coordinator, crawler, coder, writer, supporter and auditor1:
 - vision/image path;
 - Web and core tool visibility;
 - Profile-specific toolsets and denied tools;
-- Browser Use against assigned CDP;
+- official-default Browser Use resolution, no persistent CDP override, and a real navigation smoke where the Profile exposes browser tools;
 - STT input and TTS output/delivery;
 - platform message round-trip;
 - credentials key visibility without exposing values;
@@ -436,7 +436,7 @@ Before declaring completion:
 - LP-007 update-banner cache patch retired.
 - LP-008 local `pyproject.toml/uv.lock` production extra retired in favor of the external canonical environment lock.
 - Qwen STT script removed from Hermes source and designated a shared formal service asset.
-- Final intended runtime source surface is seven files; governance and local regression files are tracked separately.
+- Final intended runtime source surface is eight files; governance and local regression files are tracked separately.
 - The first reduced-candidate retained-patch run exposed an incomplete LP-011 migration: DingTalk `_get_access_token` still depended exclusively on an already-connected Stream client, so proactive/independent `sampleAudio` could not acquire a token from the official `client_id/client_secret` configuration. The existing OAuth fallback was restored as the smallest semantic hunk. The next retained-patch run completed with 158 passed, 1 skipped and 0 failed; the skipped condition must be rechecked in the canonical environment.
 
 ### Environment, configuration and service conservation completed before cutover
@@ -446,10 +446,19 @@ Before declaring completion:
 - Canonical Python 3.11.15 environment resolved and installed 245 compatible packages with a hash lock. `pip check` passed. Hermes local/upstream regression set passed 286 tests with one Windows-only skip. Real DOCX/XLSX/PPTX/PDF creation/readback passed; CUDA reported `torch 2.12.0+cu126` on NVIDIA L20.
 - Canonical MCP protocol smokes passed for OSS (including real `oss_health`), RAG (17 tools and four green SQLite/Qdrant collections with no missing points), and MiniMax. Seven Profile configs contained 17 MCP bindings; all 17 initialized and listed tools using each Profile's actual config and interpolation syntax.
 - Lightpanda 0.3.6 official release hash `e438c0ad44e0f6b8d4289b05b16eb84761f825a8d866be2f6dc01f1f58652d6` matched and the official `serve --host 127.0.0.1 --port <random>` command listened and cleaned its process group, port and temporary HOME. Chrome 151.0.7922.34 hash `0b20b130e7edd9dd51873be867761295fe0cfad490c2b9a64f95bd3cfc08fa71` was copied byte-for-byte into the central root.
-- Browser Use 0.13.7 / Browser Harness 0.1.8 executed Hermes `browser_exec(page_info())` against all seven fixed Profile CDP endpoints. All seven calls had success/exit-code zero, seven distinct HERMES_HOME workspaces and unchanged browser PIDs.
+- Browser Use 0.13.7 / Browser Harness 0.1.8 initially executed against seven fixed Profile CDP endpoints, but that was later rejected as a non-official deployment architecture. The seven persistent `browser.cdp_url` overrides were removed; all Profile browser settings now resolve to Hermes defaults (`backend` unset, `engine: auto`), and the seven fixed CDP services were disabled.
 - All 16 Cron definitions were inventoried: 15 enabled at entry and `tender-intelligence` intentionally disabled. Before cutover, the 15 enabled jobs were paused through the official CLI. The active IPO DLOM runner received SIGTERM, exited cleanly and retained audit 632 at the resumable `round2_running` checkpoint with an expired lease and reviewer `-15` receipt; the database was not hand-edited.
 - Formal Kanban boards contained no active workers at the cutover gate. Internal Journal had 86 done/archived cards; MA Detail had 295 cards with no running/claimed task.
-- A shared Crawler browser contract now governs the central Chrome entry, reserved fixed ports 9222-9228 and no-download environment. Focused browser regressions passed 87 tests. Tender self-test and real browser smoke passed; its random port/profile were removed and seven fixed browser PIDs remained unchanged. PPT visual review was changed from installer advice to fail-closed reporting.
+- A shared Crawler browser contract governs the central Chrome entry, rejects historical fixed ports 9222-9228 and enforces the no-download environment. The obsolete shared-fixed-browser assertion was repaired to create its own unrelated sentinel, and the crawler browser suite passed 68/68. Five distinct Runner browser implementations started concurrently on OS-assigned ports, Tender's formal smoke passed, and every port/profile/process cleaned. Generic Kanban and competitor-info then exercised LP-017 through their formal worker/`call_agent` entries: the final Kanban card completed with `KANBAN_RUN_OWNED_OK`, central Browser Use 0.13.7, random port 37139, PAC, all four no-download guards, no uvx and zero cache delta; competitor-info returned `COMPETITOR_CRON_BROWSER_OK` and removed its isolated runtime. A deliberately short Kanban task also reproduced upstream timeout orphaning before LP-018; its residue was stopped and removed, Chrome was rebound to the worker PGID, and timeout group termination gained a dedicated regression.
+
+### Official browser architecture correction and Profile identity validation
+
+- Official docs and locked source established the actual selection chain: Browser Use is the default when its CLI is runnable; the built-in stack is the fallback; Lightpanda belongs to the built-in stack and may fall back to Chrome for unsupported built-in operations. Browser Use is not a Lightpanda-to-Chrome migration layer.
+- Interactive browser selection remains identical to locked upstream: Browser Use by default, built-in stack as fallback, `backend` unset, `engine: auto`, no persistent CDP. Only unattended Cron/Kanban execution differs through LP-017 because untouched upstream cannot launch a task-private headless Chrome, falls through to uvx when the scrubbed worker PATH lacks the CLI, and can hang on daemon-inherited pipes.
+- All seven configs migrated to schema 34 and their effective browser values match locked upstream defaults. Six named Profile fresh-session smokes loaded their identities and the new official-document-first highest rule.
+- Coder initially failed its identity smoke because it alone explicitly selected the optional `codex_app_server` runtime, whose locked implementation did not carry Hermes SOUL context into the Codex thread. Official docs define this runtime as opt-in and `auto` as default; the override was removed with `hermes -p coder config unset model.openai_runtime`, the coder Gateway was reloaded, and a fresh session correctly returned `金步摇` and the highest rule without any source change.
+- A requested Lightpanda-default change was exercised before service reload and failed its first real navigation: current Hermes passes `AGENT_BROWSER_ARGS` to agent-browser for Chrome sandbox/PAC behavior, while agent-browser rejects any custom Chrome args with `--engine lightpanda`. The production PAC is a whitelist policy (listed financial/government domains use `106.15.11.192:8888`; all other traffic is direct), not a single global proxy URL, so converting it to `AGENT_BROWSER_PROXY` would change routing semantics. The attempted config was rolled back before any Gateway loaded it, the temporary run root was removed, and all seven Profiles returned to `backend` unset / `engine: auto` / no persistent CDP. The owner chose to retain official Browser Use/Chrome defaults, keep the verified Lightpanda binary installed but inactive, make no source patch, and retest only after upstream supports per-engine launch arguments plus PAC-equivalent routing.
+- Final browser regressions passed 500/500 in Hermes and 68/68 in Crawler. Kanban core passed 25/25 and the new group-kill regression. Running every Kanban test module in one pytest process exposed 14 pre-existing order-dependent isolation failures; each exact node passed in a fresh pytest process, so no production delta was added to mask cross-module fixture leakage.
 
 ### Remaining items before this document can be marked final
 
