@@ -214,16 +214,58 @@ def _set_run_owned_browser_workspace(workspace: str) -> None:
 
 
 def _ensure_run_owned_browser(env: dict, task_id: Optional[str]) -> Optional[str]:
-    """Attach an unattended worker to one lazy, random-port Chrome lease.
+    """Attach an unattended worker to a private Browser Use runtime.
 
-    Returns an actionable error string on launch failure, otherwise None.
+    A worker that already has an operator-owned CDP endpoint still needs a
+    private ``BH_RUNTIME_DIR``/``BU_NAME``.  Browser Use otherwise starts a
+    detached shared harness daemon which can outlive the worker, keep sandbox
+    stdio pipes open, and prevent the owning runner from reaping its process.
+
+    Workers without an endpoint additionally receive one lazy, random-port
+    Chrome lease. Returns an actionable error string on failure, otherwise
+    None.
     """
     global _RUN_OWNED_BROWSER_PROC, _RUN_OWNED_BROWSER_ROOT, _RUN_OWNED_BROWSER_RUNTIME
     global _RUN_OWNED_BROWSER_URL, _RUN_OWNED_BROWSER_NAME
 
-    if not _run_owned_browser_requested(env):
+    if not _is_unattended_browser_worker():
         return None
     _apply_run_owned_browser_guards(env)
+
+    external_endpoint = str(env.get("BU_CDP_URL") or env.get("BU_CDP_WS") or "")
+    if external_endpoint:
+        with _RUN_OWNED_BROWSER_LOCK:
+            if (
+                _RUN_OWNED_BROWSER_RUNTIME is not None
+                and _RUN_OWNED_BROWSER_NAME
+                and _RUN_OWNED_BROWSER_URL == external_endpoint
+            ):
+                env["BU_NAME"] = _RUN_OWNED_BROWSER_NAME
+                env["BH_RUNTIME_DIR"] = str(_RUN_OWNED_BROWSER_RUNTIME)
+                return None
+
+            _cleanup_run_owned_browser()
+            # Browser Harness binds ``bu.sock`` below BH_RUNTIME_DIR.  Keep the
+            # complete AF_UNIX path short (Linux sun_path=108; macOS=104), just
+            # like the branch below that also launches Chrome.  A deep
+            # profile-local HERMES_HOME path is not safe here.
+            name = f"hbu_{os.getpid()}"
+            runtime = Path(tempfile.gettempdir()) / name
+            shutil.rmtree(runtime, ignore_errors=True)
+            runtime.mkdir(mode=0o700)
+
+            _RUN_OWNED_BROWSER_PROC = None
+            _RUN_OWNED_BROWSER_ROOT = None
+            _RUN_OWNED_BROWSER_RUNTIME = runtime
+            _RUN_OWNED_BROWSER_WORKSPACE = None
+            _RUN_OWNED_BROWSER_URL = external_endpoint
+            _RUN_OWNED_BROWSER_NAME = name
+            env["BU_NAME"] = name
+            env["BH_RUNTIME_DIR"] = str(runtime)
+            return None
+
+    if not _run_owned_browser_requested(env):
+        return None
     with _RUN_OWNED_BROWSER_LOCK:
         if (
             _RUN_OWNED_BROWSER_PROC is not None

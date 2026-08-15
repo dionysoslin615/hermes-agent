@@ -16,6 +16,7 @@ Only these runtime files may differ from the upstream baseline:
 6. `tools/browser_use_cli.py`
 7. `cli.py`
 8. `plugins/platforms/dingtalk/adapter.py`
+9. `hermes_cli/config.py`
 
 Governance-only files may also differ:
 
@@ -31,6 +32,7 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/hermes_cli/test_kanban_core_functionality.py`
 - `tests/hermes_cli/test_kanban_skill_readonly_sandbox.py`
 - `tests/hermes_cli/test_kanban_worker_spawn_toolsets.py`
+- `tests/hermes_cli/test_config.py`
 - `tests/tools/test_browser_use_cli.py`
 - `tests/tools/test_cloud_voice_integration.py` (DingTalk-only despite the historical filename)
 - `tests/tools/test_kanban_tools.py`
@@ -181,11 +183,11 @@ Any other Git difference is a release blocker until either removed or entered he
 
 - **Status:** ACTIVE-SOURCE.
 - **File / symbols:** `tools/browser_use_cli.py`, unattended-worker detection, governed CLI resolution, run-owned Chrome lease and daemon-safe CLI execution.
-- **Production invariant:** a Cron/Kanban worker that calls `browser_exec` without a pre-launched CDP receives one task-private central Chrome on an OS-assigned loopback port, with PAC routing, four no-download guards, a short Browser Harness runtime path, and complete daemon/process/profile cleanup. Interactive Browser Use keeps upstream defaults.
-- **Upstream 0.20.1:** Browser Harness expects an already running Chrome; when the CLI is not on the worker's scrubbed PATH, `_find_cli` falls through to `uvx browser-use`; `subprocess.run(capture_output=True)` can wait forever when the persistent Harness daemon inherits its pipes.
+- **Production invariant:** every Cron/Kanban worker that calls `browser_exec` owns a task-private Browser Harness runtime and daemon. Without a pre-launched CDP it also receives one task-private central Chrome on an OS-assigned loopback port, with PAC routing, four no-download guards and complete daemon/process/profile cleanup. Interactive Browser Use keeps upstream defaults.
+- **Upstream 0.20.1:** Browser Harness expects an already running Chrome; when the CLI is not on the worker's scrubbed PATH, `_find_cli` falls through to `uvx browser-use`; `subprocess.run(capture_output=True)` can wait forever when the persistent Harness daemon inherits its pipes. Even with an operator-owned CDP, Browser Use starts a detached Harness daemon in the shared default runtime unless the worker receives an explicit `BH_RUNTIME_DIR`/`BU_NAME` lifecycle.
 - **Why alternatives fail:** persistent Profile CDP services violate task isolation; `BH_CHROME_PATH` launches a shared/default Chrome profile and cannot express the existing PAC/task lease; per-Runner duplication leaves generic Kanban and future Cron consumers uncovered; changing HOME breaks Profile credentials and provider state.
-- **Minimal delta:** activate only for `HERMES_KANBAN_TASK` or explicit `HERMES_RUN_OWNED_BROWSER=1`; always prefer an existing CDP; resolve the one shared governed Browser Use launcher and prohibit unattended uvx fallback; start central Chrome with `--remote-debugging-port=0`; bridge to `BU_CDP_URL`; use temp files instead of stdout/stderr pipes; clean by atexit and parent-death binding.
-- **Validation:** Browser Use regressions 89/89 and browser runtime regressions 500/500; a real Kanban card completed with title/text/url readback, managed CLI, no uvx, random port, PAC, four guards and zero cache delta; competitor-info's real `call_agent` returned the same browser result and removed its isolated runtime.
+- **Minimal delta:** activate only for `HERMES_KANBAN_TASK` or explicit `HERMES_RUN_OWNED_BROWSER=1`; always prefer an existing CDP but still assign it a private `BH_RUNTIME_DIR`/`BU_NAME`; resolve the one shared governed Browser Use launcher and prohibit unattended uvx fallback; only when no CDP exists, start central Chrome with `--remote-debugging-port=0` and bridge to `BU_CDP_URL`; place the Harness AF_UNIX runtime at `/tmp/hbu_<pid>` so the complete `bu.sock` path stays below the documented 104-byte budget; use temp files instead of stdout/stderr pipes; clean by atexit and parent-death binding.
+- **Validation:** Browser Use regressions 90/90 and the complete `test_browser*.py` set 460 passed with 7 deselected; a real Kanban card completed with title/text/url readback, managed CLI, no uvx, random port 37139, PAC, four guards and zero cache delta. A real policy Cron exposed the missing external-CDP case: its escaped daemon held sandbox stdio for over an hour, and the first repair still placed `BH_RUNTIME_DIR` below the deep Profile home, causing `AF_UNIX path too long`. The corrected external-CDP smoke attached to Runner-owned Chrome on random port 45539, read the live page, removed `/tmp/hbu_<pid>`, and left no new Harness daemon, socket, port or profile residue.
 - **Retirement trigger:** upstream Browser Use natively launches a task/profile-private headless Chrome with random CDP, supports governed executable/PAC routing, fails closed instead of uvx in unattended sessions, and owns complete daemon/browser cleanup.
 
 ## LP-018 — Kanban timeout terminates the worker process group
@@ -197,6 +199,17 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Minimal delta:** on POSIX, verify `os.getpgid(pid) == pid`, signal that PGID, poll group existence, then escalate the same group to SIGKILL; preserve the injected single-PID signal hook and Windows behavior.
 - **Validation:** dedicated group-liveness regression plus Kanban core 25/25; real timeout reproduced the orphan before the patch, and a task-owned Chrome was then proven to share the worker PGID. Manual test residue was removed before proceeding.
 - **Retirement trigger:** upstream timeout/reclaim owns process-tree or cgroup termination and proves no descendants/listeners survive.
+
+## LP-019 — preserve an explicitly read-only Profile skills root
+
+- **Status:** ACTIVE-SOURCE.
+- **File / symbol:** `hermes_cli/config.py::_secure_skills_dir`, called by `ensure_hermes_home`.
+- **Production invariant:** a Profile skills root whose write bits were deliberately removed remains read-only across every Gateway, Cron, Kanban and CLI startup; fresh and writable skill roots retain the official `0700` default.
+- **Upstream 0.20.1:** every first `load_config()` in a process calls `ensure_hermes_home`, which unconditionally applies `_secure_dir(..., 0700)` to `HERMES_HOME/skills`. A direct syscall trace proved that even read-only `hermes kanban boards list --json` changed crawler's explicitly locked root from `0500` back to `0700`.
+- **Why alternatives fail:** `HERMES_HOME_MODE=0500` also locks Cron, sessions, logs and all other state; `HERMES_SKIP_CHMOD` does not affect `_secure_dir`; same-user chmod/timers race every new process; the Kanban Bubblewrap boundary does not cover Profile Cron, Gateway or ordinary CLI sessions.
+- **Minimal delta:** when the existing skills root has no owner/group/other write bit, preserve that stricter mode and only repair configured ownership; otherwise call the unchanged upstream `_secure_dir` path.
+- **Validation:** focused regression 5/5; complete config and file-permission modules 83/83; real crawler reproduction remained `0500` after an official Kanban CLI startup, with 184 checked skill directories/`SKILL.md` files and zero writable entries.
+- **Retirement trigger:** upstream supports a Profile-scoped read-only skills-root policy that survives `ensure_hermes_home`, or the crawler Profile is moved to a separately constrained identity/mount boundary proven to cover Gateway, Cron, Kanban and CLI execution.
 
 ---
 
