@@ -1883,15 +1883,37 @@ class DingTalkAdapter(BasePlatformAdapter):
         )
 
     async def _get_access_token(self) -> Optional[str]:
-        """Get access token using SDK's cached token."""
-        if not self._stream_client:
+        """Get an access token from the Stream SDK, with official OAuth fallback."""
+        if self._stream_client:
+            try:
+                token = await asyncio.to_thread(self._stream_client.get_access_token)
+                if token:
+                    return token
+            except Exception as exc:
+                logger.warning(
+                    "[%s] Stream SDK access token unavailable; using OAuth fallback: %s",
+                    self.name,
+                    type(exc).__name__,
+                )
+        if not self._client_id or not self._client_secret:
             return None
+
+        def _fetch() -> Optional[str]:
+            import requests
+
+            response = requests.post(
+                "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+                json={"appKey": self._client_id, "appSecret": self._client_secret},
+                timeout=20,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return str(data.get("accessToken") or "").strip() or None
+
         try:
-            # SDK's get_access_token is sync and uses requests
-            token = await asyncio.to_thread(self._stream_client.get_access_token)
-            return token
-        except Exception as e:
-            logger.error("[%s] Failed to get access token: %s", self.name, e)
+            return await asyncio.to_thread(_fetch)
+        except Exception as exc:
+            logger.error("[%s] Failed to get access token: %s", self.name, exc)
             return None
 
     async def _send_emotion(

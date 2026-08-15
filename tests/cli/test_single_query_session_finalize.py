@@ -13,6 +13,51 @@ def reset_single_query_finalize_state(monkeypatch):
 
 
 
+def test_end_single_query_session_uses_agent_tip():
+    calls = []
+    db = SimpleNamespace(
+        end_session=lambda session_id, reason: calls.append((session_id, reason))
+    )
+    fake_cli = SimpleNamespace(
+        session_id="cli-session",
+        agent=SimpleNamespace(session_id="agent-tip"),
+        _session_db=db,
+    )
+
+    cli._end_single_query_session(fake_cli)
+
+    assert calls == [("agent-tip", "cli_close")]
+
+
+def test_finalize_single_query_cleans_up_when_session_end_fails(monkeypatch):
+    calls = []
+
+    def fail_end(_session_id, _reason):
+        calls.append("end")
+        raise RuntimeError("db failed")
+
+    fake_cli = SimpleNamespace(
+        session_id="cli-session",
+        agent=SimpleNamespace(session_id="agent-tip"),
+        _session_db=SimpleNamespace(end_session=fail_end),
+        _release_active_session=lambda: calls.append("release"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_notify_single_query_session_finalize",
+        lambda _cli: calls.append("finalize"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_cleanup",
+        lambda **_kwargs: calls.append("cleanup"),
+    )
+
+    cli._finalize_single_query(fake_cli)
+
+    assert calls == ["finalize", "end", "cleanup", "release"]
+
+
 def test_finalize_single_query_releases_session_when_cleanup_fails(monkeypatch):
     calls = []
     fake_cli = SimpleNamespace(_release_active_session=lambda: calls.append("release"))

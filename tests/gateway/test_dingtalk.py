@@ -1,7 +1,9 @@
 """Tests for DingTalk platform adapter."""
 import asyncio
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -192,6 +194,196 @@ class TestSend:
         payload = mock_client.post.call_args.kwargs["json"]
         assert payload["msgtype"] == "markdown"
         assert payload["markdown"]["text"] == "Screenshot\n\n![image](https://example.com/demo.png)"
+
+
+class TestLocalDocumentSend:
+    """Local documents use the authenticated DingTalk robot OpenAPI rail."""
+
+    @staticmethod
+    def _response(payload, status=200):
+        response = MagicMock()
+        response.status_code = status
+        response.text = str(payload)
+        response.json.return_value = payload
+        return response
+
+    @staticmethod
+    def _adapter():
+        from plugins.platforms.dingtalk.adapter import DingTalkAdapter
+
+        adapter = DingTalkAdapter(PlatformConfig(
+            enabled=True,
+            extra={"client_id": "robot-code", "client_secret": "secret"},
+        ))
+        adapter._http_client = AsyncMock()
+        adapter._get_access_token = AsyncMock(return_value="access-token")
+        adapter._message_contexts["dm-conversation"] = SimpleNamespace(
+            conversation_type="1",
+            sender_staff_id="staff-verified",
+        )
+        return adapter
+
+    def test_upload_send_and_confirm_success(self, tmp_path, monkeypatch):
+        adapter = self._adapter()
+        client = cast(Any, adapter._http_client)
+        document = tmp_path / "report.pdf"
+        document.write_bytes(b"%PDF-1.7\nverified")
+        client.post.side_effect = [
+            self._response({"errcode": 0, "media_id": "media-1"}),
+            self._response({
+                "processQueryKey": "query-1",
+                "invalidStaffIdList": [],
+                "flowControlledStaffIdList": [],
+            }),
+        ]
+        client.get.side_effect = [
+            self._response({"sendStatus": "PROCESSING", "messageReadInfoList": []}),
+            self._response({
+                "sendStatus": "SUCCESS",
+                "messageReadInfoList": [{
+                    "userId": "staff-verified", "readStatus": "UNREAD",
+                }],
+            }),
+        ]
+        monkeypatch.setattr(
+            "plugins.platforms.dingtalk.adapter._FILE_STATUS_POLL_DELAYS",
+            (0, 0),
+            raising=False,
+        )
+
+        result = asyncio.run(adapter.send_document(
+            "dm-conversation", str(document), file_name="report.pdf",
+        ))
+
+        assert result.success is True
+        assert result.message_id == "query-1"
+        upload_call, send_call = client.post.call_args_list
+        assert upload_call.args[0].startswith("https://oapi.dingtalk.com/media/upload")
+        assert upload_call.kwargs["params"] == {
+            "access_token": "access-token", "type": "file",
+        }
+        assert send_call.args[0] == "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+        payload = send_call.kwargs["json"]
+        assert payload["robotCode"] == "robot-code"
+        assert payload["userIds"] == ["staff-verified"]
+        assert payload["msgKey"] == "sampleFile"
+        assert json.loads(payload["msgParam"]) == {
+            "mediaId": "media-1", "fileName": "report.pdf", "fileType": "pdf",
+        }
+        query_call = client.get.call_args_list[-1]
+        assert query_call.args[0] == "https://api.dingtalk.com/v1.0/robot/oToMessages/readStatus"
+        assert query_call.kwargs["params"] == {
+            "robotCode": "robot-code", "processQueryKey": "query-1",
+        }
+
+    def test_rejects_missing_verified_staff_id(self, tmp_path):
+        adapter = self._adapter()
+        document = tmp_path / "report.pdf"
+        document.write_bytes(b"pdf")
+
+        result = asyncio.run(adapter.send_document("unknown-chat", str(document)))
+
+        assert result.success is False
+        assert "sender_staff_id" in (result.error or "")
+        cast(Any, adapter._http_client).post.assert_not_called()
+
+    def test_rejects_group_chat_without_guessing_recipient(self, tmp_path):
+        adapter = self._adapter()
+        adapter._message_contexts["group-chat"] = SimpleNamespace(
+            conversation_type="2", sender_staff_id="staff-verified",
+        )
+        document = tmp_path / "report.pdf"
+        document.write_bytes(b"pdf")
+
+        result = asyncio.run(adapter.send_document("group-chat", str(document)))
+
+        assert result.success is False
+        assert "group" in (result.error or "").lower()
+        cast(Any, adapter._http_client).post.assert_not_called()
+
+    def test_processing_without_success_is_not_completion(self, tmp_path, monkeypatch):
+        adapter = self._adapter()
+        client = cast(Any, adapter._http_client)
+        document = tmp_path / "report.pdf"
+        document.write_bytes(b"pdf")
+        client.post.side_effect = [
+            self._response({"errcode": 0, "media_id": "media-1"}),
+            self._response({"processQueryKey": "query-1"}),
+        ]
+        client.get.return_value = self._response({
+            "sendStatus": "PROCESSING", "messageReadInfoList": [],
+        })
+        monkeypatch.setattr(
+            "plugins.platforms.dingtalk.adapter._FILE_STATUS_POLL_DELAYS",
+            (0, 0),
+            raising=False,
+        )
+
+        result = asyncio.run(adapter.send_document("dm-conversation", str(document)))
+
+        assert result.success is False
+        assert "SUCCESS" in (result.error or "")
+
+    def test_retries_when_query_row_is_not_ready(self, tmp_path, monkeypatch):
+        adapter = self._adapter()
+        client = cast(Any, adapter._http_client)
+        document = tmp_path / "report.pdf"
+        document.write_bytes(b"pdf")
+        client.post.side_effect = [
+            self._response({"errcode": 0, "media_id": "media-1"}),
+            self._response({"processQueryKey": "query-1"}),
+        ]
+        client.get.side_effect = [
+            self._response(
+                {"code": "processQueryKey.expireTime", "message": "not generated"},
+                status=400,
+            ),
+            self._response({
+                "sendStatus": "SUCCESS",
+                "messageReadInfoList": [{
+                    "userId": "staff-verified", "readStatus": "READ",
+                }],
+            }),
+        ]
+        monkeypatch.setattr(
+            "plugins.platforms.dingtalk.adapter._FILE_STATUS_POLL_DELAYS",
+            (0, 0),
+            raising=False,
+        )
+
+        result = asyncio.run(adapter.send_document("dm-conversation", str(document)))
+
+        assert result.success is True
+        assert cast(Any, adapter._http_client).get.await_count == 2
+
+    def test_rejects_file_over_upload_limit(self, tmp_path):
+        from plugins.platforms.dingtalk.adapter import _DINGTALK_MEDIA_MAX_BYTES
+
+        adapter = self._adapter()
+        document = tmp_path / "too-large.pdf"
+        with document.open("wb") as handle:
+            handle.truncate(_DINGTALK_MEDIA_MAX_BYTES + 1)
+
+        result = asyncio.run(adapter.send_document("dm-conversation", str(document)))
+
+        assert result.success is False
+        assert "limit" in (result.error or "").lower()
+        cast(Any, adapter._http_client).post.assert_not_called()
+
+    def test_redacts_access_token_from_transport_error(self, tmp_path):
+        adapter = self._adapter()
+        client = cast(Any, adapter._http_client)
+        document = tmp_path / "report.pdf"
+        document.write_bytes(b"pdf")
+        client.post.side_effect = RuntimeError(
+            "request failed for access-token"
+        )
+
+        result = asyncio.run(adapter.send_document("dm-conversation", str(document)))
+
+        assert result.success is False
+        assert "access-token" not in (result.error or "")
+        assert "[REDACTED]" in (result.error or "")
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +628,64 @@ class TestExtractMedia:
         assert urls == ["dl_img_noext"]
         # Without fileName, mime defaults to octet-stream but msg_type_str=="image" still wins
         assert mtypes == ["application/octet-stream"]
+
+    def test_audio_with_recognition_does_not_reenter_stt(self):
+        """Native recognition wins; do not download/retranscribe the same audio."""
+        from plugins.platforms.dingtalk.adapter import DingTalkAdapter
+        from gateway.platforms.base import MessageType
+
+        msg = MagicMock()
+        msg.image_content = None
+        msg.rich_text_content = None
+        msg.rich_text = None
+        msg.message_type = "audio"
+        msg.extensions = {
+            "content": {
+                "downloadCode": "dl_audio_recognized",
+                "recognition": "平台识别文本",
+            }
+        }
+        adapter = DingTalkAdapter.__new__(DingTalkAdapter)
+        msg_type, urls, mtypes = adapter._extract_media(msg)
+        assert msg_type == MessageType.VOICE
+        assert urls == []
+        assert mtypes == []
+
+    def test_audio_without_recognition_falls_back_to_stt(self):
+        """Missing native recognition keeps the local cached-audio STT fallback."""
+        from plugins.platforms.dingtalk.adapter import DingTalkAdapter
+        from gateway.platforms.base import MessageType
+
+        msg = MagicMock()
+        msg.image_content = None
+        msg.rich_text_content = None
+        msg.rich_text = None
+        msg.message_type = "audio"
+        msg.extensions = {"content": {"downloadCode": "dl_audio_fallback"}}
+        adapter = DingTalkAdapter.__new__(DingTalkAdapter)
+        msg_type, urls, mtypes = adapter._extract_media(msg)
+        assert msg_type == MessageType.VOICE
+        assert urls == ["dl_audio_fallback"]
+        assert mtypes == ["audio"]
+
+    def test_native_file_download_code_is_not_duplicated(self):
+        """Local cache metadata and upstream file routing share one media item."""
+        from plugins.platforms.dingtalk.adapter import DingTalkAdapter
+        from gateway.platforms.base import MessageType
+
+        msg = MagicMock()
+        msg.image_content = None
+        msg.rich_text_content = None
+        msg.rich_text = None
+        msg.message_type = "file"
+        msg.extensions = {
+            "content": {"downloadCode": "dl_file_once", "fileName": "report.pdf"}
+        }
+        adapter = DingTalkAdapter.__new__(DingTalkAdapter)
+        msg_type, urls, mtypes = adapter._extract_media(msg)
+        assert msg_type == MessageType.DOCUMENT
+        assert urls == ["dl_file_once"]
+        assert len(mtypes) == 1
 
 
 # ---------------------------------------------------------------------------
