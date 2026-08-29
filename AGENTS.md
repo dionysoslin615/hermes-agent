@@ -4,6 +4,28 @@ Instructions for AI coding assistants and developers working on the hermes-agent
 
 **Never give up on the right solution.**
 
+## Local production upgrade governance
+
+This checkout is a locally governed production deployment. Before any upstream
+upgrade, source edit, dependency change, runtime installation, Cron/Kanban
+migration, or production cutover, read both repository-root contracts in full:
+
+- `LOCAL_PATCHES.md` — authoritative inventory and retirement status of every
+  local semantic delta.
+- `LOCAL_UPGRADE_RUNBOOK.md` — authoritative end-to-end upgrade, rollback,
+  environment-conservation, browser-allocation, validation, and closeout
+  procedure.
+
+These files are release-blocking assets, not optional notes. A local source
+change is forbidden unless it is entered in `LOCAL_PATCHES.md` with a proven
+production invariant, upstream-absorption check, smallest semantic diff,
+regression test, and retirement condition. Prefer upstream, configuration,
+plugins, shared service assets, or Cron/Kanban contract changes over core source
+changes. The final Hermes deployment must use one canonical Python environment,
+one Node runtime/toolchain, and one centrally governed browser-runtime root.
+Automation and validation must be unable to download runtimes or browsers.
+Never delete or weaken these contracts during an upstream merge.
+
 ## What Hermes Is
 
 Hermes is a personal AI agent that runs the same agent core across a CLI, a

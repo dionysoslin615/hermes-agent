@@ -8476,13 +8476,32 @@ def enforce_max_runtime(
 
         pid = int(row["worker_pid"])
         tid = row["id"]
-        # SIGTERM then SIGKILL. Keep it simple: 5 s grace. Workers that
-        # want a cleaner shutdown can install their own SIGTERM handler
-        # before the grace expires.
+        # SIGTERM then SIGKILL. Workers are spawned with start_new_session=True,
+        # so on POSIX the recorded PID is also the worker process-group id.
+        # Signal the whole group: killing only the session leader strands
+        # Bubblewrap children, Browser Use daemons and task-owned Chrome.
         killed = False
+        group_mode = False
         kill = signal_fn if signal_fn is not None else (
             os.kill if hasattr(os, "kill") else None
         )
+        if signal_fn is None and os.name != "nt" and hasattr(os, "killpg"):
+            try:
+                if os.getpgid(pid) == pid:
+                    kill = os.killpg
+                    group_mode = True
+            except (ProcessLookupError, OSError):
+                pass
+
+        def _worker_alive() -> bool:
+            if not group_mode:
+                return _pid_alive(pid)
+            try:
+                os.killpg(pid, 0)
+                return True
+            except (ProcessLookupError, OSError):
+                return False
+
         if kill is not None:
             try:
                 kill(pid, signal.SIGTERM)
@@ -8490,10 +8509,10 @@ def enforce_max_runtime(
                 pass
             # Short polling wait — no time.sleep on the write txn.
             for _ in range(10):
-                if not _pid_alive(pid):
+                if not _worker_alive():
                     break
                 time.sleep(0.5)
-            if _pid_alive(pid):
+            if _worker_alive():
                 try:
                     # signal.SIGKILL doesn't exist on Windows.
                     _sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
@@ -10691,6 +10710,97 @@ def _resolve_worker_cli_toolsets(hermes_home: Optional[str]) -> Optional[list[st
         return None
 
 
+def _kanban_worker_skill_roots(env: dict[str, str]) -> list[Path]:
+    """Return every configured skill root visible to a dispatched worker."""
+    from hermes_constants import get_default_hermes_root
+
+    default_root = get_default_hermes_root().expanduser()
+    profile_root = Path(env.get("HERMES_HOME") or default_root).expanduser()
+    candidates = [default_root / "skills", profile_root / "skills"]
+    profiles_root = default_root / "profiles"
+    if profiles_root.is_dir():
+        candidates.extend(p / "skills" for p in profiles_root.iterdir() if p.is_dir())
+
+    # External skill roots are profile configuration, not necessarily children
+    # of HERMES_HOME. Protect the roots declared by both the default and active
+    # profile configurations.
+    from agent.skill_utils import yaml_load
+
+    for config_path in {default_root / "config.yaml", profile_root / "config.yaml"}:
+        try:
+            raw = yaml_load(config_path.read_text(encoding="utf-8")) or {}
+            external = (raw.get("skills") or {}).get("external_dirs") or []
+        except (OSError, TypeError, ValueError):
+            external = []
+        for value in external:
+            if isinstance(value, str) and value.strip():
+                expanded = os.path.expandvars(os.path.expanduser(value.strip()))
+                external_root = Path(expanded)
+                if not external_root.is_dir():
+                    raise RuntimeError(
+                        "Kanban skill write isolation unavailable: configured "
+                        f"external skill root does not exist: {external_root}"
+                    )
+                candidates.append(external_root)
+
+    # A skill directory may itself be a symlink to a path outside its skills
+    # root. Bind the resolved target too, otherwise writes through the canonical
+    # target path could bypass the read-only parent mount.
+    protected: set[Path] = set()
+    for candidate in candidates:
+        try:
+            root = candidate.resolve()
+        except OSError:
+            continue
+        if not root.is_dir():
+            continue
+        protected.add(root)
+        for current, dirs, files in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            for name in [*dirs, *files]:
+                link = current_path / name
+                if not link.is_symlink():
+                    continue
+                try:
+                    target = link.resolve(strict=True)
+                except OSError:
+                    continue
+                protected.add(target if target.is_dir() else target.parent)
+    return sorted(protected, key=lambda path: (len(path.parts), str(path)))
+
+
+def _sandbox_kanban_worker_skills_read_only(
+    cmd: list[str], env: dict[str, str]
+) -> list[str]:
+    """Wrap a worker in a mount namespace where every skill tree is read-only.
+
+    The worker still sees and can read the complete host filesystem and keeps
+    normal write access everywhere else. Failure to establish this boundary
+    is fail-closed: no Kanban worker is spawned without skill isolation.
+    """
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError("Kanban skill write isolation requires Linux bubblewrap")
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        raise RuntimeError("Kanban skill write isolation unavailable: bwrap not found")
+    roots = _kanban_worker_skill_roots(env)
+    if not roots:
+        raise RuntimeError("Kanban skill write isolation unavailable: no skill roots found")
+    wrapped = [
+        bwrap,
+        "--unshare-pid",
+        "--bind", "/", "/",
+        "--dev-bind", "/dev", "/dev",
+        "--bind", "/run", "/run",
+        "--ro-bind", "/sys", "/sys",
+        "--proc", "/proc",
+    ]
+    for root in roots:
+        wrapped.extend(["--ro-bind", str(root), str(root)])
+    wrapped.extend(["--", *cmd])
+    return wrapped
+
+
 _retagged_workspace_roots: set[str] = set()
 
 
@@ -10751,6 +10861,17 @@ def _default_spawn(
     from gateway.session_context import _VAR_MAP
     for key in _VAR_MAP:
         env.pop(key, None)
+
+    # Workers are independent background jobs, never continuations of the
+    # interactive chat or gateway process that dispatched them. Clear unknown
+    # future routing keys as well as the current _VAR_MAP set.
+    for key in tuple(env):
+        if (
+            key.startswith("HERMES_SESSION_")
+            or key.startswith("HERMES_GATEWAY_")
+            or key in {"HERMES_UI_SESSION_ID", "_HERMES_GATEWAY"}
+        ):
+            env.pop(key, None)
 
     # Inject HERMES_HOME so the worker reads the profile-scoped config.yaml
     # (fallback_providers, toolsets, agent settings, etc.) instead of the root
@@ -10895,6 +11016,7 @@ def _default_spawn(
         # turn, prints text, exits rc=0, and the dispatcher records a
         # protocol violation (incident 2026-06-09 t_d9cbe312).
         cmd.append("-Q")
+    cmd = _sandbox_kanban_worker_skills_read_only(cmd, env)
     # Redirect output to a per-task log under <board-root>/logs/.
     # Anchored at the board root (not the shared kanban root), so
     # `hermes kanban log` on a specific board reads its own file and

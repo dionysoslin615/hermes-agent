@@ -960,6 +960,25 @@ def _secure_dir(path):
     _chown_to_hermes_uid(path)
 
 
+def _secure_skills_dir(path: Path) -> None:
+    """Secure a skills root without undoing an explicit read-only lock.
+
+    ``ensure_hermes_home`` normally repairs state directories to the configured
+    owner-only mode.  A skills root with every write bit removed is different:
+    it is an administrator/user-declared filesystem boundary supported by the
+    Skills documentation.  Preserve that stricter mode while keeping the
+    normal 0700 behavior for fresh and writable skill roots.
+    """
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        mode = 0o700
+    if mode & 0o222 == 0:
+        _chown_to_hermes_uid(path)
+        return
+    _secure_dir(path)
+
+
 def _is_container() -> bool:
     """Detect if we're running inside a Docker/Podman/LXC container.
 
@@ -1070,7 +1089,10 @@ def ensure_hermes_home():
         ):
             d = home / subdir
             d.mkdir(parents=True, exist_ok=True)
-            _secure_dir(d)
+            if subdir == "skills":
+                _secure_skills_dir(d)
+            else:
+                _secure_dir(d)
         _ensure_default_soul_md(home)
 
     _HERMES_HOME_ENSURED.add(key)

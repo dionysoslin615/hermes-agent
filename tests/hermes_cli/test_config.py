@@ -119,6 +119,26 @@ class TestEnsureHermesHome:
             assert content == customized
             assert content != DEFAULT_SOUL_MD
 
+    def test_preserves_explicit_read_only_skills_root(self, tmp_path):
+        skills = tmp_path / "skills"
+        cron = tmp_path / "cron"
+        skills.mkdir()
+        cron.mkdir()
+        skills.chmod(0o500)
+        cron.chmod(0o500)
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            ensure_hermes_home()
+
+        assert skills.stat().st_mode & 0o777 == 0o500
+        assert cron.stat().st_mode & 0o777 == 0o700
+
+    def test_fresh_skills_root_keeps_official_0700_default(self, tmp_path):
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            ensure_hermes_home()
+
+        assert (tmp_path / "skills").stat().st_mode & 0o777 == 0o700
+
 
 
 

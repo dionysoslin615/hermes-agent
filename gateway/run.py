@@ -6916,9 +6916,18 @@ class TurnRunner:
             if _native_imgs:
                 try:
                     from agent.image_routing import build_native_content_parts
+                    _local_imgs = [
+                        p for p in _native_imgs
+                        if not str(p).startswith(("http://", "https://"))
+                    ]
+                    _url_imgs = [
+                        p for p in _native_imgs
+                        if str(p).startswith(("http://", "https://"))
+                    ]
                     _parts, _skipped = build_native_content_parts(
                         ctx.message,
-                        _native_imgs,
+                        _local_imgs,
+                        _url_imgs,
                     )
                     if _skipped:
                         logger.warning(

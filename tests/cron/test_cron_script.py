@@ -403,6 +403,32 @@ class TestRunJobScript:
         assert output  # a message is always produced, never a silent drop
 
 
+    def test_script_timeout_zero_means_unlimited_module_override(self, cron_env, monkeypatch):
+        from cron import scheduler as sched_mod
+
+        monkeypatch.setattr(sched_mod, "_SCRIPT_TIMEOUT", 0)
+        assert sched_mod._get_script_timeout() is None
+
+    def test_script_timeout_zero_means_unlimited_env(self, cron_env, monkeypatch):
+        from cron import scheduler as sched_mod
+
+        monkeypatch.setattr(sched_mod, "_SCRIPT_TIMEOUT", sched_mod._DEFAULT_SCRIPT_TIMEOUT)
+        monkeypatch.setenv("HERMES_CRON_SCRIPT_TIMEOUT", "0")
+        assert sched_mod._get_script_timeout() is None
+
+    def test_script_timeout_zero_means_unlimited_config(self, cron_env, monkeypatch):
+        from cron import scheduler as sched_mod
+
+        monkeypatch.setattr(sched_mod, "_SCRIPT_TIMEOUT", sched_mod._DEFAULT_SCRIPT_TIMEOUT)
+        monkeypatch.delenv("HERMES_CRON_SCRIPT_TIMEOUT", raising=False)
+        monkeypatch.setattr(
+            sched_mod,
+            "load_config",
+            lambda: {"cron": {"script_timeout_seconds": 0}},
+        )
+        assert sched_mod._get_script_timeout() is None
+
+
 class TestBuildJobPromptWithScript:
     """Test that script output is injected into the prompt."""
 

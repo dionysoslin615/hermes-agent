@@ -19,6 +19,7 @@ Usage: proxy.py <fixture-root> <certs-dir> <real-ca-bundle>
 
 import os
 import pathlib
+import select
 import socket
 import ssl
 import subprocess
@@ -150,6 +151,26 @@ def relay(source, destination):
         destination.sendall(chunk)
 
 
+def tunnel(left, right):
+    """Relay a CONNECT stream without terminating TLS.
+
+    Only fixture hosts need interception.  Passing every other HTTPS request
+    through Python's TLS stack adds a second handshake and has proved fragile
+    under the GitHub Actions/slirp network path (intermittent SSLEOFError from
+    npm and PyPI).  A normal HTTP proxy tunnels these connections unchanged.
+    """
+    peers = {left: right, right: left}
+    while True:
+        readable, _, _ = select.select(tuple(peers), (), (), UPSTREAM_TIMEOUT_SECONDS)
+        if not readable:
+            continue
+        for source in readable:
+            chunk = source.recv(MAX_REQUEST_BYTES)
+            if not chunk:
+                return
+            peers[source].sendall(chunk)
+
+
 def forward_https(conn, host, port, request):
     context = ssl.create_default_context(cafile=str(REAL_CA))
     with socket.create_connection((host, port), timeout=UPSTREAM_TIMEOUT_SECONDS) as raw:
@@ -172,6 +193,13 @@ def handle_connect(conn, target):
     """Intercept a CONNECT tunnel, terminating TLS with a minted cert."""
     host, _, port_text = target.rpartition(':')
     port = int(port_text or '443')
+    # Intercept only hosts that actually have fixtures.  Everything else is a
+    # transparent CONNECT tunnel, preserving the client's native TLS session.
+    if not (ROOT / host).is_dir():
+        with socket.create_connection((host, port), timeout=UPSTREAM_TIMEOUT_SECONDS) as upstream:
+            conn.sendall(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+            tunnel(conn, upstream)
+        return
     conn.sendall(b'HTTP/1.1 200 Connection Established\r\n\r\n')
     cert, key = cert_for(host)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

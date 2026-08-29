@@ -579,6 +579,92 @@ def test_kanban_guidance_orchestrator_decision_ownership():
     assert "workers cannot see sibling context" in KANBAN_GUIDANCE
 
 
+def test_kanban_worker_can_hide_create_and_link(monkeypatch, tmp_path):
+    """Worker-only profiles can keep lifecycle tools but hide fan-out tools."""
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_fake")
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    (home / "config.yaml").write_text("kanban:\n  worker_can_create_tasks: false\n")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    import tools.kanban_tools  # ensure registered
+    from tools.registry import invalidate_check_fn_cache, registry
+    from toolsets import resolve_toolset
+
+    invalidate_check_fn_cache()
+    schema = registry.get_definitions(set(resolve_toolset("hermes-cli")), quiet=True)
+    names = {s["function"].get("name") for s in schema if "function" in s}
+    kanban = {n for n in names if n and n.startswith("kanban_")}
+    assert "kanban_create" not in kanban
+    assert "kanban_link" not in kanban
+    assert {"kanban_show", "kanban_complete", "kanban_block", "kanban_comment"}.issubset(kanban)
+
+
+def test_kanban_guidance_not_in_normal_prompt(monkeypatch, tmp_path):
+    """A normal chat session (no HERMES_KANBAN_TASK) must NOT have
+    KANBAN_GUIDANCE in its system prompt, even for an orchestrator profile
+    that explicitly enables the Kanban toolset."""
+    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    (home / "config.yaml").write_text("toolsets:\n  - kanban\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    from pathlib import Path as _P
+    monkeypatch.setattr(_P, "home", lambda: tmp_path)
+
+    from tools.registry import invalidate_check_fn_cache
+    from model_tools import _clear_tool_defs_cache
+    invalidate_check_fn_cache()
+    _clear_tool_defs_cache()
+
+    from run_agent import AIAgent
+    a = AIAgent(
+        api_key="test",
+        base_url="https://openrouter.ai/api/v1",
+        quiet_mode=True,
+        skip_context_files=True,
+        skip_memory=True,
+    )
+    prompt = a._build_system_prompt()
+    assert "You are a Kanban worker" not in prompt
+    assert "kanban_show()" not in prompt
+
+
+def test_kanban_guidance_in_worker_prompt(monkeypatch, tmp_path):
+    """A worker session (HERMES_KANBAN_TASK set) MUST have the full
+    lifecycle guidance in its system prompt."""
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_fake")
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    from pathlib import Path as _P
+    monkeypatch.setattr(_P, "home", lambda: tmp_path)
+
+    from tools.registry import invalidate_check_fn_cache
+    from model_tools import _clear_tool_defs_cache
+    invalidate_check_fn_cache()
+    _clear_tool_defs_cache()
+
+    from run_agent import AIAgent
+    a = AIAgent(
+        api_key="test",
+        base_url="https://openrouter.ai/api/v1",
+        quiet_mode=True,
+        skip_context_files=True,
+        skip_memory=True,
+    )
+    prompt = a._build_system_prompt()
+    # Header phrase (identity-free — SOUL.md owns identity, layer 3 is protocol)
+    assert "Kanban task execution protocol" in prompt
+    # Lifecycle signals
+    assert "kanban_show()" in prompt
+    assert "kanban_complete" in prompt
+    assert "kanban_block" in prompt
+    assert "kanban_create" in prompt
+    # Anti-shell guidance
+    assert "Do not shell out" in prompt or "tools — they work" in prompt
+
+
 # ---------------------------------------------------------------------------
 # Worker task-ownership enforcement (regression tests for #19534)
 # ---------------------------------------------------------------------------

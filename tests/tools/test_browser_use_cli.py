@@ -14,7 +14,9 @@ Covers the three seams the integration relies on:
 import json
 import os
 import stat
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 
@@ -26,6 +28,8 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("BU_NAME", raising=False)
     monkeypatch.delenv("BU_AUTOSPAWN", raising=False)
     monkeypatch.delenv("BROWSER_USE_API_KEY", raising=False)
+    monkeypatch.delenv("HERMES_RUN_OWNED_BROWSER", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
     yield
 
 
@@ -249,6 +253,27 @@ class TestFindCli:
             lambda name, path=None: "/usr/local/bin/uvx" if name == "uvx" and path is None else None,
         )
         assert bu_cli._find_cli_unpatched() == ["/usr/local/bin/uvx", "browser-use"]
+
+    def test_finds_deployment_wide_managed_cli_before_uvx(self, monkeypatch):
+        monkeypatch.setattr(bu_cli, "_shared_browser_runtime_bin", lambda: "/shared/browser/bin")
+        monkeypatch.setattr(
+            bu_cli.shutil, "which",
+            lambda name, path=None: (
+                "/shared/browser/bin/browser-use"
+                if name == "browser-use" and path == "/shared/browser/bin"
+                else ("/usr/local/bin/uvx" if name == "uvx" and path is None else None)
+            ),
+        )
+        assert getattr(bu_cli, "_find_cli_unpatched")() == ["/shared/browser/bin/browser-use"]
+
+    def test_unattended_worker_never_falls_back_to_uvx(self, monkeypatch):
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-1")
+        monkeypatch.setattr(bu_cli, "_shared_browser_runtime_bin", lambda: None)
+        monkeypatch.setattr(
+            bu_cli.shutil, "which",
+            lambda name, path=None: "/usr/local/bin/uvx" if name == "uvx" else None,
+        )
+        assert getattr(bu_cli, "_find_cli_unpatched")() is None
 
     def test_none_when_neither_available(self, monkeypatch):
         monkeypatch.setattr(bu_cli.shutil, "which", lambda name, path=None: None)
@@ -574,6 +599,106 @@ class TestOwnTabPreamble:
         ast.parse(bu_cli._OWN_TAB_PREAMBLE + "print('x')")
 
 
+class TestRunOwnedBrowserLease:
+    def test_interactive_session_keeps_official_local_mode(self, monkeypatch):
+        monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
+        monkeypatch.delenv("HERMES_RUN_OWNED_BROWSER", raising=False)
+        assert bu_cli._run_owned_browser_requested({}) is False
+
+    def test_kanban_worker_requests_private_browser(self, monkeypatch):
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-1")
+        assert bu_cli._run_owned_browser_requested({}) is True
+
+    def test_explicit_cron_marker_requests_private_browser(self, monkeypatch):
+        monkeypatch.setenv("HERMES_RUN_OWNED_BROWSER", "1")
+        assert bu_cli._run_owned_browser_requested({}) is True
+
+    def test_existing_cdp_is_never_overridden(self, monkeypatch):
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-1")
+        assert bu_cli._run_owned_browser_requested(
+            {"BU_CDP_URL": "http://127.0.0.1:45678"}
+        ) is False
+
+    def test_unattended_external_cdp_owns_private_harness_runtime(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("HERMES_RUN_OWNED_BROWSER", "1")
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_PROC", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_ROOT", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_RUNTIME", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_WORKSPACE", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_URL", "")
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_NAME", "")
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
+
+        env = {"BU_CDP_URL": "http://127.0.0.1:45678"}
+        assert bu_cli._ensure_run_owned_browser(env, "cron-policy") is None
+
+        assert env["BU_CDP_URL"] == "http://127.0.0.1:45678"
+        assert env["BU_NAME"].startswith("hbu_")
+        runtime = Path(env["BH_RUNTIME_DIR"])
+        assert runtime.is_dir()
+        assert runtime.parent == Path(tempfile.gettempdir())
+        assert len(os.fsencode(runtime / "bu.sock")) < 104
+        assert bu_cli._RUN_OWNED_BROWSER_PROC is None
+        assert bu_cli._RUN_OWNED_BROWSER_URL == env["BU_CDP_URL"]
+
+        bu_cli._cleanup_run_owned_browser()
+        assert not runtime.exists()
+
+    def test_guard_env_covers_cli_and_browser_installers(self):
+        env = {}
+        bu_cli._apply_run_owned_browser_guards(env)
+        assert env == {
+            "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+            "UV_PYTHON_DOWNLOADS": "never",
+            "HERMES_SKIP_NODE_BOOTSTRAP": "1",
+            "HERMES_DISABLE_LAZY_INSTALLS": "1",
+        }
+
+    def test_cleanup_removes_bound_unattended_workspace(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "workspace" / "task-1"
+        workspace.mkdir(parents=True)
+        (workspace / "batch.json").write_text("{}")
+
+        class DeadProc:
+            @staticmethod
+            def poll():
+                return 0
+
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_PROC", DeadProc())
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_ROOT", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_RUNTIME", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_WORKSPACE", workspace)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_NAME", "")
+        bu_cli._cleanup_run_owned_browser()
+        assert not workspace.exists()
+
+    def test_browser_exec_exports_run_owned_endpoint(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-1")
+        monkeypatch.setattr(
+            bu_cli,
+            "_resolve_backend_cdp",
+            lambda env, task_id, session_name="": None,
+        )
+
+        def attach(env, task_id):
+            env["BU_CDP_URL"] = "http://127.0.0.1:45678"
+            env["BU_NAME"] = "hermes_task_1"
+            return None
+
+        monkeypatch.setattr(bu_cli, "_ensure_run_owned_browser", attach)
+        cli = _fake_cli(
+            tmp_path,
+            'cat > /dev/null\necho "cdp:$BU_CDP_URL name:$BU_NAME"\n',
+        )
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: [cli])
+        raw = bu_cli.browser_exec("print(1)", task_id="task-1")
+        assert isinstance(raw, str)
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert "cdp:http://127.0.0.1:45678 name:hermes_task_1" in result["output"]
+
+
 class TestProviderPickerIntegration:
     """The `hermes tools` Browser Automation picker row (browser_backend
     marker) must enter/leave CLI mode cleanly and highlight correctly."""
@@ -881,6 +1006,21 @@ class TestBrowserExec:
         assert result["success"] is False
         assert result["exit_code"] == 3
         assert "boom" in result["stderr"]
+
+    def test_daemon_inheriting_stdio_does_not_block_cli_completion(self, tmp_path, monkeypatch):
+        cli = _fake_cli(
+            tmp_path,
+            'cat > /dev/null\nsleep 1 &\necho "background:$!"\n',
+        )
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: [cli])
+        started = time.monotonic()
+        raw = bu_cli.browser_exec("print(1)")
+        elapsed = time.monotonic() - started
+        assert isinstance(raw, str)
+        result = json.loads(raw)
+        assert result["output"].strip().startswith("background:")
+        assert result["success"] is True
+        assert elapsed < 0.8
 
     def test_timeout_returns_actionable_error(self, tmp_path, monkeypatch):
         cli = _fake_cli(tmp_path, "cat > /dev/null\nsleep 30\n")

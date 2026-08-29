@@ -58,6 +58,11 @@ agent:
     )
     root.joinpath("config.yaml").write_text("toolsets:\n  - kanban\n", encoding="utf-8")
     monkeypatch.setenv("HERMES_HOME", str(root))
+    monkeypatch.setenv("HERMES_SESSION_KEY", "agent:main:telegram:dm:123")
+    monkeypatch.setenv("HERMES_SESSION_MESSAGE_ID", "456")
+    monkeypatch.setenv("HERMES_UI_SESSION_ID", "interactive-ui")
+    monkeypatch.setenv("HERMES_GATEWAY_BUSY_INPUT_MODE", "interrupt")
+    monkeypatch.setenv("_HERMES_GATEWAY", "1")
 
     from hermes_cli import kanban_db as kb
 
@@ -83,6 +88,11 @@ agent:
     assert pid == 4242
     assert captured["env"]["HERMES_HOME"] == str(profile)
     assert captured["env"]["HERMES_KANBAN_TASK"] == "t_spawn_tools"
+    assert "HERMES_SESSION_KEY" not in captured["env"]
+    assert "HERMES_SESSION_MESSAGE_ID" not in captured["env"]
+    assert "HERMES_UI_SESSION_ID" not in captured["env"]
+    assert "HERMES_GATEWAY_BUSY_INPUT_MODE" not in captured["env"]
+    assert "_HERMES_GATEWAY" not in captured["env"]
     assert "--toolsets" in captured["cmd"]
     pinned = captured["cmd"][captured["cmd"].index("--toolsets") + 1].split(",")
     for required in ("terminal", "web", "file", "skills", "code_execution", "delegation"):
@@ -123,11 +133,13 @@ def test_default_spawn_model_override_survives_real_cli_parse(monkeypatch, tmp_p
     kb._default_spawn(task, str(workspace))
 
     parser, _subparsers, _chat_parser = build_top_level_parser()
-    # Profile selection is attached by the outer CLI bootstrap rather than
-    # build_top_level_parser(); remove that already-validated prefix and parse
-    # the worker flags/subcommand through the real shared parser.
-    assert captured["cmd"][1:3] == ["-p", "elias"]
-    args = parser.parse_args(captured["cmd"][3:])
+    # The worker command is wrapped by the read-only skill sandbox. Profile
+    # selection is attached by the outer CLI bootstrap rather than
+    # build_top_level_parser(); unwrap bubblewrap, remove that already-validated
+    # prefix, and parse the worker flags/subcommand through the real parser.
+    worker_cmd = captured["cmd"][captured["cmd"].index("--") + 1 :]
+    assert worker_cmd[1:3] == ["-p", "elias"]
+    args = parser.parse_args(worker_cmd[3:])
 
     assert args.command == "chat"
     assert args.model == "gpt-5.6-sol"
