@@ -444,6 +444,13 @@ if [ ! -f "$SANDBOX_ROOT/root/certs/ca.pem" ]; then
     exit 1
   fi
 fi
+# Clients inside the sandbox must trust both the throwaway fixture CA and the
+# real public roots.  SSL_CERT_FILE overrides (rather than augments) a client's
+# default trust store; pointing it at ca.pem alone makes transparent CONNECT
+# traffic fail in strict clients such as uv with UnknownIssuer.
+cat "$SANDBOX_ROOT/root/certs/ca.pem" \
+  "$SANDBOX_ROOT/root/certs/real-ca.pem" \
+  > "$SANDBOX_ROOT/root/certs/ca-bundle.pem"
 GIT_UPLOAD_PACK="$(command -v git-upload-pack)"
 sed "s|@GIT_UPLOAD_PACK@|$GIT_UPLOAD_PACK|" "$SANDBOX_ASSETS/ssh-shim.sh" \
   > "$SANDBOX_ROOT/root/usr/bin/ssh"
