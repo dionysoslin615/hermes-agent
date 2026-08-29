@@ -428,6 +428,18 @@ class TestRunJobScript:
         )
         assert sched_mod._get_script_timeout() is None
 
+    def test_script_timeout_zero_runs_without_deadline(self, cron_env, monkeypatch):
+        from cron import scheduler as sched_mod
+
+        script = cron_env / "scripts" / "unlimited.py"
+        script.write_text('print("unlimited works")\n', encoding="utf-8")
+        monkeypatch.setattr(sched_mod, "_get_script_timeout", lambda: None)
+
+        success, output = sched_mod._run_job_script("unlimited.py")
+
+        assert success is True
+        assert output == "unlimited works"
+
 
 class TestBuildJobPromptWithScript:
     """Test that script output is injected into the prompt."""

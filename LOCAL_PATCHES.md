@@ -50,12 +50,13 @@ Any other Git difference is a release blocker until either removed or entered he
 ## LP-001 — unlimited Cron pre-run script duration
 
 - **Status:** ACTIVE-SOURCE.
-- **File / symbol:** `cron/scheduler.py::_get_script_timeout`.
-- **Production invariant:** `cron.script_timeout_seconds: 0` means no `subprocess.run` timeout. Long-running DLOM and similar stateful runners must not be killed at one hour.
-- **Upstream v0.20.6:** accepts only values greater than zero and otherwise returns 3600 seconds.
+- **File / symbols:** `cron/scheduler.py::_get_script_timeout`, `_run_job_script`.
+- **Production invariant:** `cron.script_timeout_seconds: 0` means no script deadline. Long-running DLOM and similar stateful runners must not be killed at one hour.
+- **Upstream v0.20.6:** accepts only values greater than zero and otherwise returns 3600 seconds; its execution loop also assumes every timeout is numeric.
 - **Why alternatives fail:** selecting an arbitrary larger number changes unlimited semantics; splitting the runner changes checkpoint, lease, delivery, and idempotency behavior.
-- **Minimal delta:** translate exact numeric zero from module override, environment bridge, or config into `None`; preserve all positive and invalid-value upstream behavior.
-- **Retirement trigger:** upstream supports an explicit unlimited setting or all formal long runners are redesigned and proven bounded without changing business semantics.
+- **Minimal delta:** translate exact numeric zero from module override, environment bridge, or config into `None`; when it is `None`, skip deadline arithmetic while retaining cancellation polling and all positive-timeout behavior.
+- **Regression evidence:** after the v0.20.6 cutover, `ipo-dlom` exposed the incomplete first port as `TypeError: unsupported operand type(s) for +: 'float' and 'NoneType'`; the corrected scheduler/script suite passed 68 tests with 1 skipped.
+- **Retirement trigger:** upstream supports an explicit unlimited setting through both configuration parsing and script execution, or all formal long runners are redesigned and proven bounded without changing business semantics.
 
 ## LP-002 — Gateway remote image URL routing
 

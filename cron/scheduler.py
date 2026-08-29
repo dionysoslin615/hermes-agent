@@ -4420,7 +4420,7 @@ def _run_job_script(
             env=env,
             **popen_kwargs,
         )
-        deadline = time.monotonic() + script_timeout
+        deadline = None if script_timeout is None else time.monotonic() + script_timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 # Same bug class as the timeout site below: a cancelled fire
@@ -4428,8 +4428,8 @@ def _run_job_script(
                 _terminate_cron_script_tree(proc)
                 _drain_script_pipes(proc)
                 return False, "Script cancelled because cron fire ownership was lost"
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
                 # Phase 4a (#85125): a script timeout must leave ZERO living
                 # descendants. killpg only reaches the script's own process
                 # group — a grandchild that called setsid (backgrounded
@@ -4443,7 +4443,9 @@ def _run_job_script(
                 _drain_script_pipes(proc)
                 return False, f"Script timed out after {script_timeout}s: {path}"
             try:
-                stdout_raw, stderr_raw = proc.communicate(timeout=min(0.1, remaining))
+                stdout_raw, stderr_raw = proc.communicate(
+                    timeout=0.1 if remaining is None else min(0.1, remaining)
+                )
                 break
             except subprocess.TimeoutExpired:
                 continue
