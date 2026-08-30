@@ -19,6 +19,10 @@ name: Install & Update E2E
 #     update FROM changes, and the moment a broken updater would strand them;
 #   * manually, where you can pick the route and how many releases to sample.
 #
+# Schedule and tag runs only exercise `hermes update`. The installer re-run
+# path is kept for workflow_dispatch (route=installer or both). Old-tag
+# curl|install.sh against current PyPI/npm is noisy on a fork schedule.
+#
 # Deliberately NOT on pull_request: a leg takes ~11 minutes of real toolchain
 # installation, and the matrix multiplies that. Updating is release-shaped work,
 # so it is gated on releases and the clock instead.
@@ -30,7 +34,7 @@ on:
         description: 'Which update route to exercise.'
         required: false
         type: choice
-        default: both
+        default: update
         options: [both, update, installer]
       tag-count:
         description: 'How many release tags to sample (newest, oldest, and a spread between).'
@@ -95,9 +99,9 @@ jobs:
       install-ref: ${{ matrix.install-ref }}
 
   # Re-running the curl one-liner over an existing checkout: autostash + pull
-  # rather than the updater's own git handling.
+  # rather than the updater's own git handling. Schedule/tag skip this job.
   installer:
-    if: github.event_name != 'workflow_dispatch' || inputs.route != 'update'
+    if: github.event_name == 'workflow_dispatch' && inputs.route != 'update'
     needs: pick-releases
     strategy:
       fail-fast: false
