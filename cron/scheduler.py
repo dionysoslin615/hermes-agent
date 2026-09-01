@@ -724,7 +724,12 @@ from cron.jobs import (
     save_job_output,
     use_cron_store,
 )
-from cron.executions import create_execution, finish_execution, mark_execution_running
+from cron.executions import (
+    create_execution,
+    discard_unstarted_execution,
+    finish_execution,
+    mark_execution_running,
+)
 
 # Sentinel: when a cron agent has nothing new to report, it can start its
 # response with this marker to suppress delivery.  Output is still saved
@@ -8093,11 +8098,31 @@ def tick(
             # This prevents a queued lease from expiring before execution.
             claimed = claim_job_for_fire(job["id"], return_job=True)
             if not claimed:
-                finish_execution(
-                    job["execution_id"],
-                    success=False,
-                    error="Fire claim lost; execution was not started.",
-                )
+                # Another live/manual/external fire owns the durable claim.
+                # This worker never started the job, so the pre-dispatch
+                # placeholder is not an execution failure and must not pollute
+                # history, incidents, or failure streak reporting.
+                try:
+                    discarded = discard_unstarted_execution(job["execution_id"])
+                except Exception as discard_err:
+                    discarded = False
+                    logger.exception(
+                        "Job '%s': could not discard unstarted overlap record: %s",
+                        job.get("name", job["id"]),
+                        discard_err,
+                    )
+                if not discarded:
+                    # A state/ownership mismatch is not a normal overlap. Keep
+                    # an immutable diagnostic rather than deleting a record
+                    # that may have started or belongs to another process.
+                    finish_execution(
+                        job["execution_id"],
+                        success=False,
+                        error=(
+                            "Fire claim lost before execution; the unstarted "
+                            "ledger placeholder could not be safely discarded."
+                        ),
+                    )
                 return True
             # Production CAS returns the exact persisted record with its unique
             # owner. Bool fallback keeps older test doubles/API overrides

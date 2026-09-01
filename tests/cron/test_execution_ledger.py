@@ -39,6 +39,28 @@ def test_execution_transitions_are_durable(monkeypatch, tmp_path):
     assert persisted == [completed]
 
 
+def test_discard_unstarted_execution_is_owner_and_state_fenced(monkeypatch, tmp_path):
+    executions = _point_ledger(monkeypatch, tmp_path)
+
+    unstarted = executions.create_execution("overlap", source="builtin")
+    assert executions.discard_unstarted_execution(unstarted["id"]) is True
+    assert executions.latest_execution("overlap") is None
+
+    running = executions.create_execution("running", source="builtin")
+    executions.mark_execution_running(running["id"])
+    assert executions.discard_unstarted_execution(running["id"]) is False
+    persisted_running = executions.latest_execution("running")
+    assert persisted_running is not None
+    assert persisted_running["status"] == "running"
+
+    completed = executions.create_execution("completed", source="builtin")
+    executions.finish_execution(completed["id"], success=True)
+    assert executions.discard_unstarted_execution(completed["id"]) is False
+    persisted_completed = executions.latest_execution("completed")
+    assert persisted_completed is not None
+    assert persisted_completed["status"] == "completed"
+
+
 def test_execution_ledger_follows_the_current_profile_home(monkeypatch, tmp_path):
     import cron.executions as executions
 

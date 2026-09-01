@@ -9,23 +9,29 @@
 Only these runtime files may differ from the upstream baseline:
 
 1. `cron/scheduler.py`
-2. `gateway/run.py`
-3. `agent/agent_init.py`
-4. `tools/kanban_tools.py`
-5. `hermes_cli/kanban_db.py`
-6. `tools/browser_use_cli.py`
-7. `plugins/platforms/dingtalk/adapter.py`
-8. `hermes_cli/config.py`
+2. `cron/executions.py`
+3. `gateway/run.py`
+4. `agent/agent_init.py`
+5. `tools/kanban_tools.py`
+6. `hermes_cli/kanban_db.py`
+7. `tools/browser_use_cli.py`
+8. `plugins/platforms/dingtalk/adapter.py`
+9. `hermes_cli/config.py`
+10. `agent/conversation_compression.py`
+11. `agent/context_compressor.py`
 
 Governance/CI-only files may also differ:
 
 - `AGENTS.md`
 - `LOCAL_PATCHES.md`
 - `LOCAL_UPGRADE_RUNBOOK.md`
-- `scripts/sandbox/proxy.py` (CI-001; never imported by production runtime)
+- `scripts/sandbox/proxy.py`, `scripts/sandbox/stage2-run.sh` and `scripts/dev-sandbox.sh` (CI-001; never imported by production runtime)
+- `scripts/install.sh` (CI-002 installer-only; not imported by production runtime)
 
 Local regression files may differ only when they directly exercise an ACTIVE-SOURCE invariant:
 
+- `tests/cron/test_execution_ledger.py`
+- `tests/cron/test_run_one_job.py`
 - `tests/cron/test_cron_script.py`
 - `tests/gateway/test_dingtalk.py`
 - `tests/hermes_cli/test_kanban_core_functionality.py`
@@ -35,6 +41,9 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/tools/test_browser_use_cli.py`
 - `tests/tools/test_cloud_voice_integration.py` (DingTalk-only despite the historical filename)
 - `tests/tools/test_kanban_tools.py`
+- `tests/test_install_sh_node_deps_failure.py` (CI-002 installer regression)
+- `tests/run_agent/test_in_place_compaction.py` (LP-020 marker-stamp contract)
+- `tests/agent/test_lean_single_aux_call.py` (LP-021 single-aux-call contract)
 
 Any other Git difference is a release blocker until either removed or entered here after the complete necessity procedure.
 
@@ -115,7 +124,9 @@ Any other Git difference is a release blocker until either removed or entered he
 
 - **Status:** EXTERNALIZED / retired from source.
 - **Former files:** `pyproject.toml`, `uv.lock`.
-- **Replacement:** one external, hash-locked canonical-environment manifest plus before/after distribution conservation and real consumer smoke tests, documented in `LOCAL_UPGRADE_RUNBOOK.md`.
+- **Replacement:** one external, hash-locked canonical-environment manifest plus before/after distribution conservation and real consumer smoke tests, documented in `LOCAL_UPGRADE_RUNBOOK.md`. Node-based production tools follow the same rule: WeStock is fixed at `~/.hermes/services/westock-data/1.0.4/package`, records npm source/SHA1/SHA512 integrity in `runtime-manifest.json`, and is invoked only through `~/.local/bin/westock-data-clawhub`; task-time `npx` installation is forbidden.
+- **Consumer audit:** the deterministic `ipo-dlom-two-pass-runner.py` directly invokes the fixed launcher and its focused WeStock tests pass. Current `ipo-crawl` does **not** consume WeStock: its isolated `HERMES_HOME` contains only the `ipo-crawl` Skill, its Agent is launched with `--skills ipo-crawl`, and neither the live Runner nor IPO Crawl artifacts contain a WeStock command. Do not add or preserve a false IPO Crawl dependency during upgrades.
+- **Validation:** fixed launcher output is byte-identical to direct execution of the pinned package entry for the same query; live search and `kline --fq hfq` pass after removal of the old `_npx` working copy.
 - **Reason for retirement:** machine-specific PDF and production service packages must not modify upstream package metadata.
 
 ## LP-009 — terminal state for quiet one-shot sessions
@@ -209,6 +220,46 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Validation:** focused regression 5/5; complete config and file-permission modules 83/83; real crawler reproduction remained `0500` after an official Kanban CLI startup, with 184 checked skill directories/`SKILL.md` files and zero writable entries.
 - **Retirement trigger:** upstream supports a Profile-scoped read-only skills-root policy that survives `ensure_hermes_home`, or the crawler Profile is moved to a separately constrained identity/mount boundary proven to cover Gateway, Cron, Kanban and CLI execution.
 
+## LP-020 — in-place compaction commit stamps the persistence marker
+
+- **Status:** ACTIVE-SOURCE.
+- **File / symbols:** `agent/conversation_compression.py` in-place commit branch, immediately after `archive_and_compact(...)` sets `split_status = "in_place_committed"`.
+- **Production invariant:** after an in-place (`compression.in_place: true`) batch compaction commits, every compacted dict carries `_DB_PERSISTED_MARKER`, so the append-only flush (`_persist_session` → `_flush_messages_to_session_db_unlocked`) never re-INSERTs the post-compaction transcript. Live context size must monotonically shrink across a committed compaction.
+- **Failure evidence (2026-08-30, coordinator session `20260830_121928_330881ba`, auditor1 session `20260829_205018_6a336f35`):** `compress()` returns marker-swept COPIES (`_strip_persistence_markers`); the in-place commit path — unlike `ContextCompressor._sync_micro_compact_to_db` — never re-stamped them. The same tool-result batch was durable-written twice with byte-identical timestamps at commit, again at turn finalize, and a fourth time mid-next-turn (state.db rows 529239/529304/529371/529692 sharing tool_call_id `call_NqMk...`; auditor1 held 41 duplicate groups, ~3.0 MB redundant). Live sets grew ~58K → ~512K tokens and every later preflight compression timed out at the 600 s ceiling against a session that no longer fit the model window, producing repeated "Context compression made no progress" failures on both profiles.
+- **Why alternatives fail:** upstream v0.20.6 + 552 commits were checked (`git log HEAD..origin/main`): rotation-side dedupe (#94996 salvage) and compressor attempt-ownership races are fixed, but the in-place path still lacks the post-commit stamp; no config/plugin alternative can restore the marker (it is in-memory state on the returned dicts, required by the flush's skip contract).
+- **Minimal delta:** 13 lines inside the `if in_place:` branch — import `_DB_PERSISTED_MARKER`, stamp every dict in `compressed`. No other file or behavior touched.
+- **Validation:** `tests/run_agent/test_in_place_compaction.py` — `TestInPlaceCommitStampsPersistenceMarkers.test_committed_dicts_carry_marker` and `.test_no_duplicate_rows_after_post_commit_persist` (reproduces the production commit→persist sequence; asserts one active row per compacted message and zero duplicate contents). 13/13 pass with the fix; reverting ONLY the source hunk makes the new tests fail (verified via `git stash`), proving regression coverage.
+- **Retirement trigger:** upstream stamps the persistence marker on the compacted set in the in-place commit path (or returns marker-preserving dicts with an equivalent flush-skip guarantee). Re-check on every upgrade against `agent/conversation_compression.py` and `agent/context_compressor.py::_sync_micro_compact_to_db`. origin/main already contains `1f2bd9e763` (#98450); retire this entry only on a freeze-tag upgrade that includes that commit, not when merely backporting LP-021.
+
+## LP-021 — lean compaction makes exactly one auxiliary request
+
+- **Status:** ACTIVE-SOURCE (temporary backport of upstream `4f22543509` / #96603 onto the v0.20.6 production tree).
+- **File / symbols:** `agent/context_compressor.py` — remove `_build_chunk_digests` and sibling digest helpers; fold the session log into the single `_generate_summary` request; even-sample oversized lean input via `_sample_summary_input`.
+- **Production invariant:** a lean-mode compaction attempt issues exactly one auxiliary `call_llm`. The digest loop (up to 28 sequential DeepSeek calls) is gone. Live context size after a committed compaction is unchanged by this patch (that remains LP-020).
+- **Failure evidence (2026-08-31):** after LP-020, coordinator still issued four `Auxiliary compression: using deepseek` calls in ~7 minutes (10:51–10:58) and a 337 s micro-compaction. Local HEAD still contained `_build_chunk_digests`; default `compression.tail_mode: lean`.
+- **Why not a full upgrade:** origin/main is ~603 commits ahead; cherry-picking `4f22543509` onto this tree conflicts. Runbook forbids copying whole files. This is the smallest semantic hunk.
+- **Minimal delta:** digest-loop removal, session-log section in the summary template, even-sampling for lean input, drop `_lean_pristine_tools` snapshot. LP-020 is untouched. Docs/evals from the upstream commit are not ported.
+- **Validation:** `tests/agent/test_lean_single_aux_call.py` 8/8 and LP-020 marker tests 2/2 pass (`10 passed in 2.80s`).
+- **Retirement trigger:** freeze-tag upgrade that already contains `4f22543509`. Do not keep this hunk when merging that tag.
+
+## LP-022 — Cron overlap suppression is not a failed execution
+
+- **Status:** ACTIVE-SOURCE.
+- **Files / symbols:** `cron/executions.py::discard_unstarted_execution`; `cron/scheduler.py::tick._process_job`.
+- **Production invariant:** when a built-in tick loses the durable `fire_claim` to an already-running, manual, or external fire, the job has not started and must not be recorded as `failed`, increment failure streaks, create incidents, or pollute business completion reporting.
+- **Failure evidence (2026-09-01):** `ipo-dlom` runs every minute and correctly serializes long projects, but 44 overlap attempts from 04:55 through 05:38 were recorded as `failed` with `Fire claim lost; execution was not started.`; all 44 had `started_at IS NULL` and represented zero failed projects.
+- **Why alternatives fail:** marking overlap as completed corrupts success counts; adding a new terminal status widens the public schema and every consumer; filtering only reports leaves `cron doctor`, incidents, and failure streaks wrong; slowing the DLOM schedule creates avoidable queue idle time.
+- **Minimal delta:** retain the pre-dispatch claimed placeholder for crash recovery, then transactionally delete only the current process's exact `claimed`, never-started row after confirmed claim loss. Any ownership/state mismatch remains an immutable diagnostic failure.
+- **Validation:** focused execution-ledger and tick regressions prove normal overlap leaves no history row, while running/completed/foreign or otherwise unsafe rows cannot be deleted; complete relevant Cron suites must remain green.
+- **Retirement trigger:** upstream records only successfully fire-claimed built-in attempts, or introduces a first-class neutral skipped/overlap terminal state excluded from failures, incidents, streaks, and business completion counts.
+
+## DEPLOYMENT-CONTRACT DC-007 — compression total ceiling 1800 s on every profile
+
+- **Class:** deployment contract; no source delta (config-only).
+- **Files:** every profile `config.yaml` (`compression.context_total_ceiling_seconds: 1800`); coordinator, auditor1, coder, crawler, writer, supporter and default set 2026-08-30, read back verified.
+- **Invariant:** a legitimately slow large-context compression is allowed to finish instead of being amputated at the default 600 s ceiling. Production: a 232,847-token summary completed server-side at 823.9 s but was abandoned at 600 s; 470K/525K-token real-payload probes completed in 45.3 s/12.8 s while in-session attempts died at 600 s. 1800 s covers the observed worst case with margin while keeping runaway attempts bounded.
+- **Upgrade check:** confirm the key survives the merge in every profile config; if upstream changes the default or the semantics of `compression.context_total_ceiling_seconds` / `hygiene_total_ceiling_seconds`, re-derive this contract.
+
 ---
 
 ## Upgrade-time mandatory retirement procedure
@@ -226,12 +277,22 @@ For every LP on every upgrade:
 
 The authoritative operational sequence, rollback rules and environment/browser conservation checks are in `LOCAL_UPGRADE_RUNBOOK.md`.
 
-## CI-001 — transparent non-fixture HTTPS in Install & Update E2E
+## CI-001 — trusted transparent non-fixture HTTPS in Install & Update E2E
 
 - **Class:** CI-only; not production runtime source.
-- **File:** `scripts/sandbox/proxy.py`.
-- **Invariant:** the real installer/update matrix must not fail because the test proxy performs a redundant second TLS handshake for npm/PyPI traffic.
-- **Upstream/fork evidence:** both upstream and the fork repeatedly failed with `SSLEOFError` inside the Python MITM proxy; update legs otherwise progressed.
-- **Minimal delta:** keep MITM only for fixture hosts and use standard transparent CONNECT tunnelling for every non-fixture host.
-- **Validation:** local bidirectional CONNECT integration smoke and Python compilation pass; the synchronized fork workflow is the final remote acceptance test.
+- **Files:** `scripts/sandbox/proxy.py`, `scripts/sandbox/stage2-run.sh`, `scripts/dev-sandbox.sh`.
+- **Invariant:** the real installer/update matrix must not fail because the fixture proxy performs a redundant second TLS handshake or replaces the public CA set with only the fixture CA.
+- **Upstream/fork evidence:** both upstream and the fork failed first with CONNECT relay `SSLEOFError`; after transparent tunnelling, uv correctly exposed `UnknownIssuer` because `SSL_CERT_FILE` contained only the fixture root.
+- **Minimal delta:** keep MITM only for fixture hosts, use bidirectional transparent CONNECT tunnelling for non-fixture hosts, build one CA bundle containing both the fixture CA and the runner's public roots, and point curl/OpenSSL/Git/Node at that same bundle inside stage 2.
+- **Validation:** local bidirectional CONNECT integration smoke, Python/shell validation, fork run `33237541031`, and production-commit fork run `33245992470`: update and installer routes both passed from release `v2026.5.16` to the synchronized branch.
 - **Retirement trigger:** upstream adopts an equivalent tunnel or replaces the sandbox proxy.
+
+## CI-002 — scope curl-installer npm dependencies away from Desktop
+
+- **Class:** installer/CI-only; not production runtime source.
+- **Files:** `scripts/install.sh`, `tests/test_install_sh_node_deps_failure.py`.
+- **Invariant:** the CLI installer installs the root toolchain plus `ui-tui` and `web`, but does not traverse `apps/desktop`, download Electron, or build desktop-native modules.
+- **Upstream evidence:** root `package.json` is now a workspace monorepo and already declares the intended scoped scripts; `hermes update` likewise names only `ui-tui`, `web`, and `--include-workspace-root`, while `install.sh` still ran an unscoped root `npm install`. The installer E2E therefore failed after the code update reached the workspace-era manifest.
+- **Minimal delta:** make the installer use the same explicit workspace scope and standard npm flags as the updater; preserve the existing TUI stage and failure handling.
+- **Validation:** focused installer/updater regressions `6 passed`; fork run `33237541031` passed both update and installer routes at commit `0fc5b11ce3a05daf03a447c17a82b1caecfc1b91`.
+- **Retirement trigger:** upstream scopes the root installer identically or removes the root Node dependency stage.
