@@ -2,10 +2,18 @@
 
 **Authority:** release-blocking and equal in importance to `LOCAL_PATCHES.md`.
 **Scope:** Hermes core, seven formal Profiles, all formal Cron jobs, all formal Kanban workflows, Python/Node/browser runtimes, Gateway/platform delivery, TTS/STT, Browser Use and Lightpanda.
-**Current target:** Hermes v2026.8.27 / `5fc308a70719a83cccdbba4c0e39c23f5a8239d5` (v0.20.6).
-**Production rollback identity at start of this upgrade:** `5d0a1c379b05c38d290e101e0df335b21cf30651`.
+**Current target:** immutable upstream snapshot `18a76be124d7c16ed98b629a358b23fef76a7f46` (Hermes v0.21.0, 142 commits after formal tag v2026.8.31 / `29112bef099274229cadff79cdff7bf7b99c4b77`). It closes the full 4,629-commit gap from the previous fork main in one cycle.
+**Production rollback identity at start of this upgrade:** `7329b3ad7b5f32653e5414d863ab587c2c472e4e` (v0.20.6 locally governed production).
 
 This is an executable operating contract, not a narrative. An upgrade is not complete because code was copied, tests passed, a process started, or a browser opened. It is complete only after the exact upstream identity, minimal local delta, unique runtimes, all Profile routes, all Cron/Kanban business outcomes, delivery side effects, cleanup, rollback materials and this record have been independently read back.
+
+### Current-cycle upstream and candidate evidence (2026-09-01)
+
+- Upstream gap closed: 4,629 commits from the prior fork main to frozen upstream `18a76be124d7c16ed98b629a358b23fef76a7f46`; the post-v2026.8.31 unreleased slice is 142 commits across 351 files.
+- Post-tag changes were reviewed by commit subject and file surface. The two overlaps with active local runtime files (`agent/agent_init.py`, `gateway/run.py`) retain distinct, still-unabsorbed production invariants after rebasing.
+- Candidate identity: governed branch `upgrade/v0210-minimal-20260901`; five carried commits over the frozen upstream snapshot; 26 changed files, limited to the ledger allowlist.
+- Regression evidence on the rebased snapshot: 72 of 73 changed/local test files passed on the host (1,810 passed, 37 skipped). The sole host-blocked file was the updater suite seeing real production Gateway PIDs; the same complete file passed in an isolated PID/network container (47 passed). Combined verified result: 1,857 passed, 37 skipped, zero code failures.
+- Candidate runtime was rebuilt after testing from the hash-locked requirements contract: Python 3.11.15, Hermes 0.21.0, 262 compatible dependency packages plus the editable Hermes distribution; no lazy-test package is retained.
 
 ---
 
@@ -13,7 +21,7 @@ This is an executable operating contract, not a narrative. An upgrade is not com
 
 ### 1.1 Upstream-first source policy
 
-1. Resolve an immutable upstream tag and full commit SHA. Never upgrade to floating `main`.
+1. Prefer the latest immutable formal tag. If the owner explicitly requests unreleased upstream fixes, fetch `origin/main` once, freeze its full commit SHA, record the post-tag delta and test that exact object; never build against a ref that moves during execution.
 2. Start the candidate from untouched upstream.
 3. Re-audit every entry in `LOCAL_PATCHES.md` against the new upstream implementation, sibling call paths, tests, official documentation and real production invariant.
 4. Retire any patch absorbed upstream or replaceable by config, plugin, shared service asset, Cron/Kanban contract or deployment procedure.
@@ -113,7 +121,7 @@ The 2026-08-15 Lightpanda incident proved why: an undocumented naked `lightpanda
 
 ## 3. Upgrade workspace and rollback layout
 
-Use one upgrade id, for example `hermes-v0201-YYYYMMDD-HHMMSS`.
+Use one upgrade id, for example `hermes-v0210-YYYYMMDD-HHMMSS`.
 
 - Formal source checkout: `~/.hermes/hermes-agent`
 - Temporary worktrees/builds/tests: `~/.hermes/tmp/<upgrade-id>/`
@@ -160,7 +168,7 @@ Rollback materials must be read back before proceeding. A path existing is not p
 7. Run focused regressions and the relevant full suites in an isolated test home with Node/browser downloads disabled.
 8. Run an `env -i` clean-process CLI/import identity check.
 
-LP-010, LP-013, LP-014 and LP-016 are upstream-absorbed on the v2026.8.27 target. LP-007 and LP-008 remain retired through deployment alternatives. LP-017 and LP-018 remain only because untouched target behavior still fails the existing Browser Harness lifecycle and Kanban process-group invariants. LP-019 remains because the official CLI still overwrites an explicitly read-only Crawler `skills` root. The closed allowlist is eight runtime source files and nine local regression files, all listed in `LOCAL_PATCHES.md`.
+LP-009, LP-010, LP-013, LP-014, LP-016, LP-020, LP-021 and CI-002 are upstream-absorbed on snapshot `18a76be124d7c16ed98b629a358b23fef76a7f46`. LP-007 and LP-008 remain retired through deployment alternatives. LP-017 and LP-018 remain only because untouched target behavior still fails the existing Browser Harness lifecycle and Kanban process-group invariants. LP-019 remains because the official CLI still overwrites an explicitly read-only Crawler `skills` root. LP-022 remains because untouched upstream records a normal lost race instead of a failed non-execution. The closed allowlist is nine runtime source files, three CI-001 files and eleven local regression files, all listed in `LOCAL_PATCHES.md`.
 
 ---
 
