@@ -59,11 +59,57 @@ def test_tick_process_job_sequence(monkeypatch):
 def test_tick_skips_job_when_durable_fire_claim_is_lost(monkeypatch):
     """A manual/external fire that wins the shared CAS must exclude ticker."""
     calls = _patch_pipeline(monkeypatch)
+    discarded = []
+    finished = []
     monkeypatch.setattr(s, "get_due_jobs", lambda: [{"id": "j1", "name": "t"}])
-    monkeypatch.setattr(s, "claim_job_for_fire", lambda _job_id: False)
+    monkeypatch.setattr(s, "create_execution", lambda *_a, **_kw: {"id": "exec-j1"})
+    monkeypatch.setattr(s, "claim_job_for_fire", lambda *_a, **_kw: False)
+    monkeypatch.setattr(
+        s,
+        "discard_unstarted_execution",
+        lambda execution_id: discarded.append(execution_id) or True,
+    )
+    monkeypatch.setattr(
+        s,
+        "finish_execution",
+        lambda *args, **kwargs: finished.append((args, kwargs)),
+    )
 
-    assert s.tick(verbose=False, sync=True) == 0
+    # tick counts a safely handled due item; the business pipeline still did
+    # not run and no terminal execution was written.
+    assert s.tick(verbose=False, sync=True) == 1
     assert calls == []
+    assert discarded == ["exec-j1"]
+    assert finished == []
+
+
+def test_tick_records_diagnostic_if_overlap_placeholder_is_not_discardable(monkeypatch):
+    calls = _patch_pipeline(monkeypatch)
+    finished = []
+    monkeypatch.setattr(s, "get_due_jobs", lambda: [{"id": "j1", "name": "t"}])
+    monkeypatch.setattr(s, "create_execution", lambda *_a, **_kw: {"id": "exec-j1"})
+    monkeypatch.setattr(s, "claim_job_for_fire", lambda *_a, **_kw: False)
+    monkeypatch.setattr(s, "discard_unstarted_execution", lambda _execution_id: False)
+    monkeypatch.setattr(
+        s,
+        "finish_execution",
+        lambda *args, **kwargs: finished.append((args, kwargs)),
+    )
+
+    assert s.tick(verbose=False, sync=True) == 1
+    assert calls == []
+    assert finished == [
+        (
+            ("exec-j1",),
+            {
+                "success": False,
+                "error": (
+                    "Fire claim lost before execution; the unstarted ledger "
+                    "placeholder could not be safely discarded."
+                ),
+            },
+        )
+    ]
 
 
 def test_run_one_job_success_sequence(monkeypatch):
