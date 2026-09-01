@@ -288,5 +288,5 @@ The authoritative operational sequence, rollback rules and environment/browser c
 - **Invariant:** Install & Update E2E may select only release refs accepted by the target main branch, and its reachability test must run against a complete commit graph.
 - **Failure evidence:** fork run `33449769412` selected a release tag left unreachable by an upstream history rewrite; after adding reachability filtering, run `33515746755` used `fetch-tags: true` with the default shallow depth and falsely reported zero reachable tags because tagged ancestors were behind the shallow boundary.
 - **Minimal delta:** filter release tags with `merge-base --is-ancestor "${tag}^{}" HEAD`; set the picker checkout to `fetch-depth: 0` while retaining `fetch-tags: true`.
-- **Validation:** local full-graph and synthetic unreachable-tag picker tests, followed by Exact-HEAD fork E2E.
+- **Validation:** local full-graph and synthetic unreachable-tag picker tests, followed by Exact-HEAD fork E2E run `33524153684` at runtime commit `aae3b91bff7a99972efb5110913c826dec623d3e`; the picker plus all ten installer/update matrix jobs passed.
 - **Retirement trigger:** upstream adopts equivalent reachability filtering plus a complete picker checkout graph.
