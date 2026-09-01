@@ -65,18 +65,25 @@ if [ -z "$REPO" ]; then
 fi
 
 # sort -V orders v2026.4.8 before v2026.4.13 (numeric), which a plain
-# lexicographic sort gets wrong.
+# lexicographic sort gets wrong. The installer accepts only refs reachable
+# from the target main branch. Forks can retain tag objects removed by an
+# upstream history rewrite, so filter by the same reachability contract.
 mapfile -t tags < <(
-  git -C "$REPO" tag --list 'v*' \
-    | grep -E '^v[0-9]{4}\.[0-9]+\.[0-9]+(\.[0-9]+)?$' \
-    | sort -V
+  while IFS= read -r tag; do
+    if git -C "$REPO" merge-base --is-ancestor "${tag}^{}" HEAD 2>/dev/null; then
+      printf '%s\n' "$tag"
+    fi
+  done < <(
+    git -C "$REPO" tag --list 'v*' \
+      | grep -E '^v[0-9]{4}\.[0-9]+\.[0-9]+(\.[0-9]+)?$'
+  ) | sort -V
 )
 
 total="${#tags[@]}"
 if [ "$total" -eq 0 ]; then
   echo "error: no release tags found in $REPO" >&2
-  echo '       A shallow clone has no tags: fetch with tags (actions/checkout' >&2
-  echo '       with fetch-depth: 0, or fetch-tags: true).' >&2
+  echo '       Fetch the complete commit graph and tags (actions/checkout with' >&2
+  echo '       fetch-depth: 0 and fetch-tags: true).' >&2
   exit 1
 fi
 

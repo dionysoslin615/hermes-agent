@@ -1,7 +1,7 @@
 # LOCAL_PATCHES.md — production semantic delta ledger
 
 **Authority:** release-blocking, equal in force to `LOCAL_UPGRADE_RUNBOOK.md`.
-**Upstream baseline:** immutable `origin/main` snapshot `18a76be124d7c16ed98b629a358b23fef76a7f46` (Hermes v0.21.0, 142 commits after formal tag v2026.8.31 / `29112bef099274229cadff79cdff7bf7b99c4b77`). This unreleased snapshot was selected explicitly to absorb the full 4,629-commit upstream gap in one maintenance cycle; future upgrades must freeze a new full SHA before staging and never follow a moving ref during execution.
+**Upstream baseline:** immutable `origin/main` snapshot `f709bd88b6cc62b23f40e878c1d5960604302ee2` (Hermes v0.21.0, 155 commits after formal tag v2026.8.31 / `29112bef099274229cadff79cdff7bf7b99c4b77`). This unreleased snapshot was selected explicitly to absorb the full 4,642-commit upstream gap in one maintenance cycle; future upgrades must freeze a new full SHA before staging and never follow a moving ref during execution.
 **Policy:** upstream-first. A local semantic delta survives only when current upstream lacks an equivalent, configuration/plugin/shared-service/Cron/Kanban alternatives cannot preserve the same production invariant, and a real regression test proves deletion would break an existing function. Every future upgrade must attempt retirement again before porting code.
 
 ## Allowed source-difference surface
@@ -24,6 +24,7 @@ Governance/CI-only files may also differ:
 - `LOCAL_PATCHES.md`
 - `LOCAL_UPGRADE_RUNBOOK.md`
 - `scripts/sandbox/proxy.py`, `scripts/sandbox/stage2-run.sh` and `scripts/dev-sandbox.sh` (CI-001; never imported by production runtime)
+- `.github/workflows/install-e2e.yml` and `scripts/sandbox/pick-release-tags.sh` (CI-003; never imported by production runtime)
 
 Local regression files may differ only when they directly exercise an ACTIVE-SOURCE invariant:
 
@@ -279,3 +280,13 @@ The authoritative operational sequence, rollback rules and environment/browser c
 - **Upstream evidence:** `scripts/install.sh::node_deps_workspace_args` now scopes installation to `ui-tui`, `web`, and the workspace root, with a root-only fallback that excludes `apps/*`.
 - **Rule:** the former `scripts/install.sh` hunk and installer-only regression are not ported.
 - **Validation:** frozen-target installer scope tests and Exact-HEAD fork E2E must pass.
+
+## CI-003 — select only reachable release tags with a complete checkout graph
+
+- **Class:** CI-only; not production runtime source.
+- **Files:** `.github/workflows/install-e2e.yml`, `scripts/sandbox/pick-release-tags.sh`.
+- **Invariant:** Install & Update E2E may select only release refs accepted by the target main branch, and its reachability test must run against a complete commit graph.
+- **Failure evidence:** fork run `33449769412` selected a release tag left unreachable by an upstream history rewrite; after adding reachability filtering, run `33515746755` used `fetch-tags: true` with the default shallow depth and falsely reported zero reachable tags because tagged ancestors were behind the shallow boundary.
+- **Minimal delta:** filter release tags with `merge-base --is-ancestor "${tag}^{}" HEAD`; set the picker checkout to `fetch-depth: 0` while retaining `fetch-tags: true`.
+- **Validation:** local full-graph and synthetic unreachable-tag picker tests, followed by Exact-HEAD fork E2E.
+- **Retirement trigger:** upstream adopts equivalent reachability filtering plus a complete picker checkout graph.
