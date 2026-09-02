@@ -55,7 +55,7 @@ Any other Git difference is a release blocker until either removed or entered he
 
 - `git cherry -v origin/main HEAD` reports all ten local non-merge commits as `+`: exact patch-id absorption is zero.
 - Semantic review found related upstream work around compression, browser lifecycle, routed-profile Cron and multiplexed secrets, but none fully preserves the production invariants carried by the allowed runtime files above. No active local source delta is retired in this cutover.
-- The failed `agent-browser` 0.36 experiment and the proposed Hermes packaging workaround were both discarded before production. Production remains on Hermes' existing `agent-browser` 0.26.0 contract. Lightpanda compatibility is supplied only by the external governed browser runtime: Lightpanda 0.3.7 plus an engine-aware launcher; no new Hermes runtime-source patch was added for this repair.
+- The failed `agent-browser` 0.36 experiment and all proposed Hermes packaging workarounds were discarded before production. Production remains on Hermes' original npm-native `agent-browser` 0.26.0 entry. The upgrade-created `services/browser-runtime/bin/agent-browser` wrapper and Lightpanda 0.3.7 downgrade were both erroneous experiment residue and were fully retired after owner correction. The pre-upgrade governed state is restored: Chrome remains the active/default browser path, while official Lightpanda 0.4.0 is installed only as the explicitly deferred optional engine recorded in `runtime-manifest.json`. No new `hermes-agent` runtime-source patch or deployment-layer launcher remains from this experiment.
 
 ## Required status vocabulary
 
