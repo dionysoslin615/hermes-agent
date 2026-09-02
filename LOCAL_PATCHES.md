@@ -1,7 +1,7 @@
 # LOCAL_PATCHES.md — production semantic delta ledger
 
 **Authority:** release-blocking, equal in force to `LOCAL_UPGRADE_RUNBOOK.md`.
-**Upstream baseline:** immutable `origin/main` snapshot `f709bd88b6cc62b23f40e878c1d5960604302ee2` (Hermes v0.21.0, 155 commits after formal tag v2026.8.31 / `29112bef099274229cadff79cdff7bf7b99c4b77`). This unreleased snapshot was selected explicitly to absorb the full 4,642-commit upstream gap in one maintenance cycle; future upgrades must freeze a new full SHA before staging and never follow a moving ref during execution.
+**Upstream baseline:** owner-frozen immutable `origin/main` snapshot `73f68362b3f639b97352a5dedc9e74b10520a84f` (Hermes v0.21.0; 478 upstream commits after the prior `f709bd88b6cc62b23f40e878c1d5960604302ee2` production baseline). The owner explicitly froze this SHA after the candidate had already passed, rather than continuing to chase a moving `main`; later upstream movement belongs to a later maintenance cycle.
 **Policy:** upstream-first. A local semantic delta survives only when current upstream lacks an equivalent, configuration/plugin/shared-service/Cron/Kanban alternatives cannot preserve the same production invariant, and a real regression test proves deletion would break an existing function. Every future upgrade must attempt retirement again before porting code.
 
 ## Allowed source-difference surface
@@ -50,6 +50,12 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/tools/test_kanban_tools.py`
 
 Any other Git difference is a release blocker until either removed or entered here after the complete necessity procedure.
+
+### 2026-09-02 absorption readback
+
+- `git cherry -v origin/main HEAD` reports all ten local non-merge commits as `+`: exact patch-id absorption is zero.
+- Semantic review found related upstream work around compression, browser lifecycle, routed-profile Cron and multiplexed secrets, but none fully preserves the production invariants carried by the allowed runtime files above. No active local source delta is retired in this cutover.
+- The failed `agent-browser` 0.36 experiment and the proposed Hermes packaging workaround were both discarded before production. Production remains on Hermes' existing `agent-browser` 0.26.0 contract. Lightpanda compatibility is supplied only by the external governed browser runtime: Lightpanda 0.3.7 plus an engine-aware launcher; no new Hermes runtime-source patch was added for this repair.
 
 ## Required status vocabulary
 
