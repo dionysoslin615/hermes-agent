@@ -80,17 +80,21 @@ def chrome_cdp(request):
         port_offset = int(worker_id.lstrip("gw"))
     port = 9225 + port_offset
     profile = tempfile.mkdtemp(prefix="hermes-supervisor-test-")
+    chrome_argv = [
+        _find_chrome(),
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--headless=new",
+        "--disable-gpu",
+        "--site-per-process",  # force OOPIFs for cross-origin iframes
+    ]
+    from tools.browser_tool import _needs_chromium_sandbox_bypass
+    if _needs_chromium_sandbox_bypass():
+        chrome_argv.extend(["--no-sandbox", "--disable-dev-shm-usage"])
     proc = subprocess.Popen(
-        [
-            _find_chrome(),
-            f"--remote-debugging-port={port}",
-            f"--user-data-dir={profile}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--headless=new",
-            "--disable-gpu",
-            "--site-per-process",  # force OOPIFs for cross-origin iframes
-        ],
+        chrome_argv,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

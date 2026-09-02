@@ -70,6 +70,14 @@ def test_cleanup_reloads_updated_profile_config(isolated_snapshot_threshold):
     _write_threshold(isolated_snapshot_threshold, 15001)
     assert browser_tool.get_browser_snapshot_threshold() == 12000
 
+    # Both values have the same byte length. Evict the raw-config cache so this
+    # test isolates the browser lifecycle cache instead of depending on the
+    # filesystem exposing a different mtime_ns for two immediate writes.
+    from hermes_cli import config as hermes_config
+    hermes_config._RAW_CONFIG_CACHE.pop(
+        str(isolated_snapshot_threshold / "config.yaml"), None
+    )
+
     browser_tool.cleanup_all_browsers()
     assert browser_tool.get_browser_snapshot_threshold() == 15001
 

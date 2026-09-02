@@ -235,7 +235,7 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     ),
     "platform.dingtalk": (
         "dingtalk-stream==0.24.3",
-        "alibabacloud-dingtalk==2.2.42",
+        "alibabacloud-dingtalk==2.2.57",
         "qrcode==7.4.2",
     ),
     "platform.feishu": (

@@ -312,7 +312,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/a0/87/1d7019d23891897cb
 
 [[package]]
 name = "alibabacloud-dingtalk"
-version = "2.2.42"
+version = "2.2.57"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alibabacloud-endpoint-util" },
@@ -322,9 +322,9 @@ dependencies = [
     { name = "alibabacloud-tea-openapi" },
     { name = "alibabacloud-tea-util" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/38/66/36efc03a2a8ed16c2ce176fd5ab6ff9725d0048aef33eaf867e85e625401/alibabacloud_dingtalk-2.2.42.tar.gz", hash = "sha256:220b1d52f5ef82a23ea625d3c8a91a733a685417248e217cf5aa30fe0b3a8978", size = 2023797, upload-time = "2026-04-10T03:58:28.143Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/13/ee4bfdd9a6aececa888d5ed3abab9a3f063bf004729864ada3b786b50586/alibabacloud_dingtalk-2.2.57.tar.gz", hash = "sha256:f365049e96cd5074770320f5562f525463ce07133ad7f33df5853fb49a2dd1d5", size = 2131789, upload-time = "2026-08-19T10:40:37.596Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/80/7d1c1438e17c1fc90d037f1b73debe3fc2dfa348eb91e12818c2584d1865/alibabacloud_dingtalk-2.2.42-py3-none-any.whl", hash = "sha256:5f5c2ef3351b7926eb870af11089e14f802e4caa51d5f72920ad79a67f03d3e4", size = 2142688, upload-time = "2026-04-10T03:58:26.33Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/4d/0fdbd9dd01b29d2b6644c5690992ce84a4d8bf80d20279121285b32d92fc/alibabacloud_dingtalk-2.2.57-py3-none-any.whl", hash = "sha256:ae3f2099ec6eb71cedc5a38d22b69989926b392aa049613bfc0d5f50226fc8da", size = 2256460, upload-time = "2026-08-19T10:40:35.77Z" },
 ]
 
 [[package]]
@@ -345,12 +345,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/d2/40/751d8bdf133d7fcf0
 
 [[package]]
 name = "alibabacloud-gateway-spi"
-version = "0.0.3"
+version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alibabacloud-credentials" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ab/98/d7111245f17935bf72ee9bea60bbbeff2bc42cdfe24d2544db52bc517e1a/alibabacloud_gateway_spi-0.0.3.tar.gz", hash = "sha256:10d1c53a3fc5f87915fbd6b4985b98338a776e9b44a0263f56643c5048223b8b", size = 4249, upload-time = "2025-02-23T16:29:54.222Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cd/67/7cd36a36bf0ec53efd3fe31eaf398713f375b7b1cdcd32c51b6c0fdc09e2/alibabacloud_gateway_spi-0.0.4.tar.gz", hash = "sha256:73d6e20d65b54eed26d89c19640d3a7572e18c45ecada627f806f5dbe8ed2130", size = 4253, upload-time = "2026-06-25T06:34:08.238Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/85/81170c45e9d1240736f9776a1c690b958c975509381221b5f8d960b5376d/alibabacloud_gateway_spi-0.0.4-py3-none-any.whl", hash = "sha256:0d5256e95d8719da8ec9611b7ffbb12c2d26fdf7ce52c8f64e4e06350731e893", size = 4290, upload-time = "2026-06-25T06:34:07.22Z" },
+]
 
 [[package]]
 name = "alibabacloud-openapi-util"
@@ -1923,7 +1926,7 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'teams'", specifier = "==3.14.3" },
     { name = "aiohttp-socks", marker = "extra == 'matrix'", specifier = "==0.11.0" },
     { name = "aiosqlite", marker = "extra == 'matrix'", specifier = "==0.22.1" },
-    { name = "alibabacloud-dingtalk", marker = "extra == 'dingtalk'", specifier = "==2.2.42" },
+    { name = "alibabacloud-dingtalk", marker = "extra == 'dingtalk'", specifier = "==2.2.57" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = "==0.87.0" },
     { name = "asyncpg", marker = "extra == 'matrix'", specifier = "==0.31.0" },
     { name = "azure-identity", marker = "extra == 'azure-identity'", specifier = "==1.25.3" },

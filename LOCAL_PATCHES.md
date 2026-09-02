@@ -18,6 +18,12 @@ Only these runtime files may differ from the upstream baseline:
 8. `plugins/platforms/dingtalk/adapter.py`
 9. `hermes_cli/config.py`
 
+Package-contract files may differ only for the explicitly approved DingTalk SDK pin in LP-023:
+
+- `pyproject.toml`
+- `uv.lock`
+- `tools/lazy_deps.py`
+
 Governance/CI-only files may also differ:
 
 - `AGENTS.md`
@@ -37,6 +43,9 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/hermes_cli/test_kanban_worker_spawn_toolsets.py`
 - `tests/hermes_cli/test_config.py`
 - `tests/tools/test_browser_use_cli.py`
+- `tests/tools/test_browser_real_profile.py`
+- `tests/tools/test_browser_snapshot_threshold.py`
+- `tests/tools/test_browser_supervisor.py`
 - `tests/tools/test_cloud_voice_integration.py` (DingTalk-only despite the historical filename)
 - `tests/tools/test_kanban_tools.py`
 
@@ -60,6 +69,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Why alternatives fail:** selecting an arbitrary larger number changes unlimited semantics; splitting the runner changes checkpoint, lease, delivery, and idempotency behavior.
 - **Minimal delta:** translate exact numeric zero from module override, environment bridge, or config into `None`; when it is `None`, skip deadline arithmetic while retaining cancellation polling and all positive-timeout behavior.
 - **Regression evidence:** after the v0.20.6 cutover, `ipo-dlom` exposed the incomplete first port as `TypeError: unsupported operand type(s) for +: 'float' and 'NoneType'`; the corrected scheduler/script suite passed 68 tests with 1 skipped.
+- **Upstream tracking:** [#100943](https://github.com/NousResearch/hermes-agent/issues/100943).
 - **Retirement trigger:** upstream supports an explicit unlimited setting through both configuration parsing and script execution, or all formal long runners are redesigned and proven bounded without changing business semantics.
 
 ## LP-002 — Gateway remote image URL routing
@@ -69,6 +79,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Production invariant:** HTTP(S) image references from messaging platforms reach a vision-capable model as native `image_url` parts.
 - **Untouched upstream snapshot:** the image builder supports `image_urls`, but this Gateway call site passes every reference as a local path; URL references therefore enter local filesystem checks and are skipped.
 - **Minimal delta:** partition local paths and HTTP(S) URLs at the call site and pass them to the two official parameters.
+- **Upstream tracking:** existing issue [#31857](https://github.com/NousResearch/hermes-agent/issues/31857) was rechecked and supplemented with the cross-platform Gateway call-site evidence; no duplicate issue was opened.
 - **Retirement trigger:** upstream Gateway performs the same partition or normalizes every platform image into a verified local cache before this call.
 
 ## LP-003 — authenticated DingTalk inbound media normalization
@@ -78,6 +89,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Production invariant:** DingTalk image, audio and document messages become readable local paths; voice messages use platform recognition text when non-empty and otherwise run configured Hermes STT.
 - **Untouched upstream snapshot:** extracts some references and resolves `downloadCode` to a temporary URL, but command STT rejects non-local paths before execution and document/image consumers require readable local bytes.
 - **Minimal delta:** keep latest upstream adapter and add only authenticated byte acquisition, type-safe cache, dedupe and recognition/STT fallback.
+- **Upstream tracking:** inbound media chain [#31857](https://github.com/NousResearch/hermes-agent/issues/31857) and document callback gap [#16964](https://github.com/NousResearch/hermes-agent/issues/16964).
 - **Retirement trigger:** upstream DingTalk emits local cached media with equivalent auth, size/type limits and voice fallback.
 
 ## LP-004 — Profile-scoped Kanban worker fan-out
@@ -88,6 +100,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Real consumers:** coordinator and auditor1 may fan out; crawler, coder, writer and supporter are restricted. The Internal Journal contract still uses worker-created continuation cards.
 - **Why toolset removal fails:** removing the Kanban toolset also removes `show`, `heartbeat`, `comment`, `complete` and `block`, so the worker cannot satisfy its protocol.
 - **Minimal delta:** default true for upstream compatibility; hide and reject only create/link for explicitly false worker profiles; require `HERMES_KANBAN_TASK` before injecting worker guidance.
+- **Upstream tracking:** [#100944](https://github.com/NousResearch/hermes-agent/issues/100944).
 - **Retirement trigger:** upstream has per-profile/per-worker allow and deny controls that preserve lifecycle tools.
 
 ## LP-005 — read-only Skill trees for Kanban workers
@@ -97,6 +110,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Production invariant:** every dispatched Kanban worker can read but cannot modify any default, Profile, external or symlink-target Skill tree.
 - **Why chmod fails:** worker and skill owner are the same Linux user; a worker can reverse owner permission bits. Current formal Skill roots are owner-writable outside task-specific lock windows.
 - **Minimal delta:** Linux bubblewrap around only the worker process; host filesystem otherwise unchanged; all visible Skill roots and symlink targets `--ro-bind`; missing boundary fails closed.
+- **Upstream tracking:** existing task-scoped read-only overlay proposal [#33245](https://github.com/NousResearch/hermes-agent/issues/33245).
 - **Retirement trigger:** upstream offers an equivalent mount/sandbox policy or workers run under a separately constrained identity proven unable to write every Skill target.
 
 ## LP-006 — Kanban worker routing-environment scrub
@@ -106,6 +120,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Production invariant:** detached workers never inherit interactive Gateway/session routing identity.
 - **Untouched upstream snapshot:** removes only keys currently present in `_VAR_MAP`.
 - **Minimal delta:** additionally remove all `HERMES_SESSION_*`, all `HERMES_GATEWAY_*`, `HERMES_UI_SESSION_ID`, and `_HERMES_GATEWAY` before adding worker-owned variables.
+- **Upstream tracking:** child authority/environment inheritance is tracked by [#83565](https://github.com/NousResearch/hermes-agent/issues/83565), including the related Kanban subprocess reports it indexes.
 - **Retirement trigger:** upstream owns a prefix-complete sanitizer applied to dispatcher children.
 
 ## LP-007 — update-banner cache invalidation
@@ -145,6 +160,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Production invariant:** a locally generated document/audio result is delivered to the actual DingTalk user and a final status is sent; API success is validated from response body, not HTTP status alone.
 - **Untouched upstream snapshot:** local document send explicitly returns unsupported; no complete sampleFile/sampleAudio/sendStatus path.
 - **Minimal delta:** reuse upstream adapter/session identity; add only DingTalk OpenAPI calls, Stream-token reuse with official OAuth fallback for proactive/independent sends, cache and expiry bounds, real recipient validation and truthful `SendResult`.
+- **Upstream tracking:** authenticated local-document delivery [#76096](https://github.com/NousResearch/hermes-agent/issues/76096); broader platform media-send gap [#22487](https://github.com/NousResearch/hermes-agent/issues/22487).
 - **Retirement trigger:** upstream provides equivalent local document/audio delivery, proactive OAuth token acquisition and status confirmation.
 
 ## LP-012 — Qwen STT and native voice delivery
@@ -191,6 +207,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Untouched v0.21.0:** Browser Harness expects an already running Chrome; when the CLI is not on the worker's scrubbed PATH, `_find_cli` falls through to `uvx browser-use`; `subprocess.run(capture_output=True)` can wait forever when the persistent Harness daemon inherits its pipes. Even with an operator-owned CDP, Browser Use starts a detached Harness daemon in the shared default runtime unless the worker receives an explicit `BH_RUNTIME_DIR`/`BU_NAME` lifecycle.
 - **Why alternatives fail:** persistent Profile CDP services violate task isolation; `BH_CHROME_PATH` launches a shared/default Chrome profile and cannot express the existing PAC/task lease; per-Runner duplication leaves generic Kanban and future Cron consumers uncovered; changing HOME breaks Profile credentials and provider state.
 - **Minimal delta:** activate only for `HERMES_KANBAN_TASK` or explicit `HERMES_RUN_OWNED_BROWSER=1`; always prefer an existing CDP but still assign it a private `BH_RUNTIME_DIR`/`BU_NAME`; resolve the one shared governed Browser Use launcher and prohibit unattended uvx fallback; only when no CDP exists, start central Chrome with `--remote-debugging-port=0` and bridge to `BU_CDP_URL`; place the Harness AF_UNIX runtime at `/tmp/hbu_<pid>` so the complete `bu.sock` path stays below the documented 104-byte budget; use temp files instead of stdout/stderr pipes; clean by atexit and parent-death binding.
+- **Upstream tracking:** [#100945](https://github.com/NousResearch/hermes-agent/issues/100945).
 - **Validation:** Browser Use regressions 90/90 and the complete `test_browser*.py` set 460 passed with 7 deselected; a real Kanban card completed with title/text/url readback, managed CLI, no uvx, random port 37139, PAC, four guards and zero cache delta. A real policy Cron exposed the missing external-CDP case: its escaped daemon held sandbox stdio for over an hour, and the first repair still placed `BH_RUNTIME_DIR` below the deep Profile home, causing `AF_UNIX path too long`. The corrected external-CDP smoke attached to Runner-owned Chrome on random port 45539, read the live page, removed `/tmp/hbu_<pid>`, and left no new Harness daemon, socket, port or profile residue.
 - **Retirement trigger:** upstream Browser Use natively launches a task/profile-private headless Chrome with random CDP, supports governed executable/PAC routing, fails closed instead of uvx in unattended sessions, and owns complete daemon/browser cleanup.
 
@@ -201,6 +218,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Production invariant:** max-runtime enforcement terminates the entire worker session, including Bubblewrap children, Browser Harness daemon and task-owned Chrome, before releasing the claim or recording timeout.
 - **Untouched v0.21.0:** `_default_spawn` uses `start_new_session=True`, but timeout enforcement signals only the recorded leader PID and treats leader exit as complete; live descendants and browser listeners remain orphaned.
 - **Minimal delta:** on POSIX, verify `os.getpgid(pid) == pid`, signal that PGID, poll group existence, then escalate the same group to SIGKILL; preserve the injected single-PID signal hook and Windows behavior.
+- **Upstream tracking:** existing exact-class report [#80280](https://github.com/NousResearch/hermes-agent/issues/80280).
 - **Validation:** dedicated group-liveness regression plus Kanban core 25/25; real timeout reproduced the orphan before the patch, and a task-owned Chrome was then proven to share the worker PGID. Manual test residue was removed before proceeding.
 - **Retirement trigger:** upstream timeout/reclaim owns process-tree or cgroup termination and proves no descendants/listeners survive.
 
@@ -212,6 +230,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Untouched v0.21.0:** every first `load_config()` in a process calls `ensure_hermes_home`, which unconditionally applies `_secure_dir(..., 0700)` to `HERMES_HOME/skills`. A direct syscall trace proved that even read-only `hermes kanban boards list --json` changed crawler's explicitly locked root from `0500` back to `0700`.
 - **Why alternatives fail:** `HERMES_HOME_MODE=0500` also locks Cron, sessions, logs and all other state; `HERMES_SKIP_CHMOD` does not affect `_secure_dir`; same-user chmod/timers race every new process; the Kanban Bubblewrap boundary does not cover Profile Cron, Gateway or ordinary CLI sessions.
 - **Minimal delta:** when the existing skills root has no owner/group/other write bit, preserve that stricter mode and only repair configured ownership; otherwise call the unchanged upstream `_secure_dir` path.
+- **Upstream tracking:** existing `_secure_dir` permission-clobber report [#68055](https://github.com/NousResearch/hermes-agent/issues/68055) was used rather than opening a narrower duplicate.
 - **Validation:** focused regression 5/5; complete config and file-permission modules 83/83; real crawler reproduction remained `0500` after an official Kanban CLI startup, with 184 checked skill directories/`SKILL.md` files and zero writable entries.
 - **Retirement trigger:** upstream supports a Profile-scoped read-only skills-root policy that survives `ensure_hermes_home`, or the crawler Profile is moved to a separately constrained identity/mount boundary proven to cover Gateway, Cron, Kanban and CLI execution.
 
@@ -237,8 +256,18 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Failure evidence (2026-09-01):** `ipo-dlom` runs every minute and correctly serializes long projects, but 44 overlap attempts from 04:55 through 05:38 were recorded as `failed` with `Fire claim lost; execution was not started.`; all 44 had `started_at IS NULL` and represented zero failed projects.
 - **Why alternatives fail:** marking overlap as completed corrupts success counts; adding a new terminal status widens the public schema and every consumer; filtering only reports leaves `cron doctor`, incidents, and failure streaks wrong; slowing the DLOM schedule creates avoidable queue idle time.
 - **Minimal delta:** retain the pre-dispatch claimed placeholder for crash recovery, then transactionally delete only the current process's exact `claimed`, never-started row after confirmed claim loss. Any ownership/state mismatch remains an immutable diagnostic failure.
+- **Upstream tracking:** [#100946](https://github.com/NousResearch/hermes-agent/issues/100946).
 - **Validation:** focused execution-ledger and tick regressions prove normal overlap leaves no history row, while running/completed/foreign or otherwise unsafe rows cannot be deleted; complete relevant Cron suites must remain green.
 - **Retirement trigger:** upstream records only successfully fire-claimed built-in attempts, or introduces a first-class neutral skipped/overlap terminal state excluded from failures, incidents, streaks, and business completion counts.
+
+## LP-023 — DingTalk OpenAPI SDK 2.2.57 pin
+
+- **Status:** ACTIVE-SOURCE package contract; no Hermes runtime logic change.
+- **Files:** `pyproject.toml`, `uv.lock`, `tools/lazy_deps.py`.
+- **Production invariant:** the canonical Hermes environment and future rebuilds use `alibabacloud-dingtalk==2.2.57`; every unrelated Python distribution remains frozen. The resolver metadata change to `alibabacloud-gateway-spi==0.0.4` is required by 2.2.57 and matches the version already present in production before this maintenance.
+- **Minimal delta:** change only the DingTalk extra/lazy-dependency pins and the two corresponding lock records. The external hash lock at `~/.hermes/services/python-runtime/` remains the production installation authority; task-time lazy installation stays forbidden in production.
+- **Validation:** a relocatable Python 3.11.15 candidate built from the full external hash lock conserved 262/262 distributions with only `alibabacloud-dingtalk` changing; `uv pip check`, Robot/Card/new-model imports, 51 focused DingTalk tests and five Profile configuration checks passed before cutover. Production cutover then installed exactly 2.2.57, retained the already-present gateway SPI 0.0.4, restarted only the five DingTalk Profiles, preserved the default/crawler Gateway PIDs, and read back all five platform states as connected with live TLS sockets. The final 18-file local regression matrix passed 596 tests with 8 intentional skips and zero failures.
+- **Retirement trigger:** the next immutable upstream target pins 2.2.57 or newer and passes the same conservation and DingTalk regression matrix.
 
 ## DEPLOYMENT-CONTRACT DC-007 — compression total ceiling 1800 s on every profile
 
@@ -289,4 +318,14 @@ The authoritative operational sequence, rollback rules and environment/browser c
 - **Failure evidence:** fork run `33449769412` selected a release tag left unreachable by an upstream history rewrite; after adding reachability filtering, run `33515746755` used `fetch-tags: true` with the default shallow depth and falsely reported zero reachable tags because tagged ancestors were behind the shallow boundary.
 - **Minimal delta:** filter release tags with `merge-base --is-ancestor "${tag}^{}" HEAD`; set the picker checkout to `fetch-depth: 0` while retaining `fetch-tags: true`.
 - **Validation:** local full-graph and synthetic unreachable-tag picker tests, followed by Exact-HEAD fork E2E run `33524153684` at runtime commit `aae3b91bff7a99972efb5110913c826dec623d3e`; the picker plus all ten installer/update matrix jobs passed.
+- **Upstream tracking:** [#100947](https://github.com/NousResearch/hermes-agent/issues/100947).
 - **Retirement trigger:** upstream adopts equivalent reachability filtering plus a complete picker checkout graph.
+
+## CI-004 — deterministic browser regression harnesses
+
+- **Class:** test-only; never imported by production runtime.
+- **Files:** `tests/tools/test_browser_real_profile.py`, `tests/tools/test_browser_snapshot_threshold.py`, `tests/tools/test_browser_supervisor.py`.
+- **Invariant:** Browser lifecycle tests isolate the unit under test instead of accidentally launching a real Chrome, depending on same-size file rewrites changing `mtime_ns`, or omitting the same AppArmor sandbox bypass selected by production.
+- **Validation:** after upgrading the governed browser stack, the complete 60-file Browser/CDP set passed as independent processes: 877 passed and one intentional OOPIF skip. Real Chrome and Lightpanda CDP validation is recorded in `LOCAL_UPGRADE_RUNBOOK.md`.
+- **Upstream tracking:** [#100983](https://github.com/NousResearch/hermes-agent/issues/100983), [#100988](https://github.com/NousResearch/hermes-agent/issues/100988), and the integration-fixture note on [#15765](https://github.com/NousResearch/hermes-agent/issues/15765).
+- **Retirement trigger:** upstream tests contain equivalent deterministic isolation and environment-sensitive sandbox setup.
