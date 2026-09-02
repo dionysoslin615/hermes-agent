@@ -14,6 +14,7 @@ This is an executable operating contract, not a narrative. An upgrade is not com
 - The frozen upstream range also adds routed-profile Cron delivery and multiplexed Profile path/secret isolation, bot-chat DM routing, faster `serve`, model-picker refresh, Session SQLite auto-pruning/VACUUM and between-turn tool/MCP refresh caching.
 - Candidate regression is isolated from production and passes 914 tests with 12 intentional skips; the A2A plugin suite passes separately. Python remains 3.11.15 with 262 hash-locked distributions, `cryptography==50.0.0`, `torch==2.12.0+cu126` and `alibabacloud-dingtalk==2.2.57`.
 - At the owner's correction, the experimental `agent-browser` 0.36 path and all proposed new Hermes source changes were discarded. `agent-browser` remains exactly 0.26.0. Lightpanda was instead downgraded from incompatible 0.4.0 to official 0.3.7 and verified through the existing 0.26.0 command contract (`open`, `get title`, `snapshot`, `close`) under hostile inherited Chrome variables.
+- Docker cleanup removed all 58 unreferenced anonymous E2E harness-home volumes (302.8 MB), the retired `hermes-agent-harness:latest` and `ubuntu:24.04` test-only images, and 8.942 GB of reclaimable builder cache. The production MySQL, Redis and Qdrant containers/images and the intentionally stopped on-demand MinerU container/image were preserved; final readback reports zero local volumes and zero reclaimable production-image bytes.
 
 ### Current-cycle upstream and candidate evidence (2026-09-01)
 
