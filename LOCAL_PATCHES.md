@@ -73,6 +73,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - The remaining fork CI jobs were not failing code: their requested `ubuntu-latest-32-core`, `ubuntu-latest-96-core`, and `windows-latest-32-core` labels are private larger-runner labels available to the upstream repository but unavailable to the personal fork, so GitHub left them queued without assigning a runner. Reusable test workflows now select those labels only in `NousResearch/hermes-agent` and otherwise fall back to standard GitHub-hosted labels; upstream capacity and behavior are unchanged.
 - On the lower-capacity standard fork runner, the SessionsPage routing regression exceeded Vitest's 5-second default once while the same lane was running all workspaces concurrently. Its explicit timeout is now 15 seconds; assertions and production code are unchanged.
 - The upstream JS auto-fix apply/PR job depends on trusted GitHub App credentials and repository PR-automation permission that a personal fork intentionally does not carry. The privileged apply job is now upstream-repository-only; forks may generate the unprivileged diagnostic patch but do not push a bot branch or attempt a PR.
+- A ui-tui regression previously assumed an asynchronous layout correction would finish within a fixed 40 ms. Standard fork runners exposed the race; that assertion now polls the same expected call with a bounded 2-second deadline instead of changing product timing.
 
 ## Required status vocabulary
 
