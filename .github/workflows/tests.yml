@@ -135,6 +135,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Install fork smoke OS dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # 8.2.0
         with:
