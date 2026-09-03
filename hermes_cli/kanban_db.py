@@ -8488,7 +8488,7 @@ def enforce_max_runtime(
         if signal_fn is None and os.name != "nt" and hasattr(os, "killpg"):
             try:
                 if os.getpgid(pid) == pid:
-                    kill = os.killpg
+                    kill = os.killpg  # windows-footgun: ok — guarded POSIX-only path
                     group_mode = True
             except (ProcessLookupError, OSError):
                 pass
@@ -8497,7 +8497,7 @@ def enforce_max_runtime(
             if not group_mode:
                 return _pid_alive(pid)
             try:
-                os.killpg(pid, 0)
+                os.killpg(pid, 0)  # windows-footgun: ok — group_mode is POSIX-only
                 return True
             except (ProcessLookupError, OSError):
                 return False

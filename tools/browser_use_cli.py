@@ -220,7 +220,8 @@ def _run_owned_child_setup() -> None:
             import ctypes
 
             libc = ctypes.CDLL(None)
-            libc.prctl(1, signal.SIGKILL, os.getppid(), 0, 0)
+            sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+            libc.prctl(1, sigkill, os.getppid(), 0, 0)
         except Exception:
             pass
 
