@@ -18,11 +18,12 @@ Only these runtime files may differ from the upstream baseline:
 8. `plugins/platforms/dingtalk/adapter.py`
 9. `hermes_cli/config.py`
 
-Package-contract files may differ only for the explicitly approved DingTalk SDK pin in LP-023:
+Package-contract files may differ only for the explicitly approved DingTalk SDK pin in LP-023 and the lock-only `sanitize-html` security update recorded below:
 
 - `pyproject.toml`
 - `uv.lock`
 - `tools/lazy_deps.py`
+- `package-lock.json`
 
 Governance/CI-only files may also differ:
 
@@ -59,11 +60,13 @@ Any other Git difference is a release blocker until either removed or entered he
 
 ### 2026-09-03 post-upgrade hygiene readback
 
-- No additional Hermes repository runtime-source delta was introduced. Seven Profile-local copies of `AGENT_BROWSER_ARGS`, `PLAYWRIGHT_BROWSERS_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` were removed from `.env`; the sole central `environment.d` declarations for the governed Playwright engine root and Chrome executable remain. The obsolete global PAC-forcing `AGENT_BROWSER_ARGS` was removed so PAC is an explicit fallback rather than an unconditional route.
+- No additional Hermes repository runtime-source delta was introduced. Profile-local `PLAYWRIGHT_BROWSERS_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` duplicates were removed; the central `environment.d` declarations remain authoritative for the governed engine root and Chrome executable. Every formal Profile retains `AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage,--proxy-pac-url=http://127.0.0.1:7788/proxy.pac`: the shared PAC sends only whitelist matches through the proxy and returns `DIRECT` for all other destinations. Tender's Firecrawl/direct-browser/PAC escalation order is task-specific and does not remove this fleet-wide PAC capability.
 - The official Playwright live-doctor path requires revision `chromium_headless_shell-1234`; a compatibility symlink under the central browser-runtime engine root resolves that path to the existing governed Chrome 152 binary. It does not duplicate, download or wrap a browser executable. Seven `doctor --live` runs launched and closed the browser successfully, and seven fresh primary-model calls returned `PROFILE_OK`.
 - The crawler DLOM runner is an external business runner, not Hermes core source. Its transaction backup now survives database commit, integrity/readback checks, durable completion receipt and the queue transition to `completed`, then is hash-verified and deleted while its path/hash/deletion time remain in the receipt. The focused runner suite passes 86 tests. This prevents successful projects from accumulating full database snapshots without weakening rollback safety.
 - Deep cleanup removed all non-Tender children of `~/.hermes/backups`, Profile backup residue, 478,703,616 allocated bytes of superseded deep service/project/MA-detail backups, 787 stale DLOM backup-directory shells plus 5,226,496 allocated bytes of completed-project repair copies, stale `/tmp` content including 67,219,456 allocated bytes of upgrade browser/pytest/audit residue, superseded MinerU jobs with hash-identical formal KB copies, obsolete MinerU temporary jobs and an unreferenced service wrapper. Git-tracked source assets are retained even when their historical names contain `backup` or `before`; Tender material, live curator recovery blobs, receipt-bound DLOM artifacts, unresolved MinerU source/intermediates and production services also remain intentionally preserved.
-- Remote refs were fetched and pruned on 2026-09-03: floating official `origin/main` was observed at `48c0c3a873bc5adaf20c632b5b7630a4fac000b4`, while fork `main` remained `cbff1e935fefe50b7e7e4947f5363992b1d4714b`. Neither was merged or pushed; the owner-frozen production target remains unchanged for this closed cycle.
+- A final two-pass residue sweep removed the new non-Tender recovery/probe backup, all unreferenced maintenance worktrees, package staging/rollback material, browser/pytest/build/audit temporaries and stale sockets; npm cache verification garbage-collected invalid content. The root backup directory now contains only the four owner-retained Tender groups.
+- `sanitize-html` is lock-pinned from vulnerable 2.17.6 to fixed 2.17.7 without changing any parent package or dependency range. The live tree resolves only 2.17.7; root and Web production audits report zero vulnerabilities. A clean isolated `npm ci --ignore-scripts` followed by Web typecheck, tests, lint and production build passed, and the candidate/rollback material was removed.
+- GitHub CLI API access was healthy while unauthenticated Git HTTPS fetches returned HTTP 429 because no credential helper was configured. `gh auth setup-git` installed the authenticated helper and `git fetch --all --prune --no-tags` then completed normally. The fork is synchronized only by a fast-forward of this governed branch; floating official `origin/main` remains next-cycle input and is not merged into the owner-frozen production target.
 
 ## Required status vocabulary
 
