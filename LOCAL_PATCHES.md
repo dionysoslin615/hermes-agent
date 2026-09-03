@@ -32,6 +32,7 @@ Governance/CI-only files may also differ:
 - `LOCAL_UPGRADE_RUNBOOK.md`
 - `scripts/sandbox/proxy.py`, `scripts/sandbox/stage2-run.sh` and `scripts/dev-sandbox.sh` (CI-001; never imported by production runtime)
 - `.github/workflows/install-e2e.yml` and `scripts/sandbox/pick-release-tags.sh` (CI-003; never imported by production runtime)
+- `.github/workflows/ci.yaml` (CI-only correction; never imported by production runtime)
 
 Local regression files may differ only when they directly exercise an ACTIVE-SOURCE invariant:
 
@@ -67,6 +68,7 @@ Any other Git difference is a release blocker until either removed or entered he
 - A final two-pass residue sweep removed the new non-Tender recovery/probe backup, all unreferenced maintenance worktrees, package staging/rollback material, browser/pytest/build/audit temporaries and stale sockets; npm cache verification garbage-collected invalid content. The root backup directory now contains only the four owner-retained Tender groups.
 - `sanitize-html` is lock-pinned from vulnerable 2.17.6 to fixed 2.17.7 without changing any parent package or dependency range. The live tree resolves only 2.17.7; root and Web production audits report zero vulnerabilities. A clean isolated `npm ci --ignore-scripts` followed by Web typecheck, tests, lint and production build passed, and the candidate/rollback material was removed.
 - GitHub CLI API access was healthy while unauthenticated Git HTTPS fetches returned HTTP 429 because no credential helper was configured. `gh auth setup-git` installed the authenticated helper and `git fetch --all --prune --no-tags` then completed normally. The fork is synchronized only by a fast-forward of this governed branch; floating official `origin/main` remains next-cycle input and is not merged into the owner-frozen production target.
+- GitHub's `ci.yaml` also failed before creating any job because the `detect-changes` composite action accepts only `github-token`, while the caller passed two checkout-only inputs (`sparse-checkout` and `sparse-checkout-cone-mode`). Removing those undefined inputs preserves the composite action's own checkout/classification implementation and allows GitHub to dispatch the workflow normally.
 
 ## Required status vocabulary
 
