@@ -23,8 +23,12 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 const waitUntil = async (predicate: () => boolean, timeoutMs = 2_000) => {
   const deadline = Date.now() + timeoutMs
+
   while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`condition not met within ${timeoutMs}ms`)
+    if (Date.now() >= deadline) {
+      throw new Error(`condition not met within ${timeoutMs}ms`)
+    }
+
     await delay(10)
   }
 }
