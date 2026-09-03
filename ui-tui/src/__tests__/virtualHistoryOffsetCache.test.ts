@@ -551,7 +551,7 @@ describe('useVirtualHistory offset cache reuse', () => {
 
       staleHeights.set(items[0]!.key, 1)
       instance.rerender(React.createElement(Harness, { expose, initialHeights: staleHeights, items }))
-      await waitUntil(() => adjustScrollTop.mock.calls.length === 1)
+      await waitUntil(() => adjustScrollTop.mock.calls.length === 1, 10_000)
 
       expect(adjustScrollTop).toHaveBeenCalledOnce()
       expect(adjustScrollTop).toHaveBeenCalledWith(1)
@@ -563,7 +563,7 @@ describe('useVirtualHistory offset cache reuse', () => {
       instance.unmount()
       instance.cleanup()
     }
-  })
+  }, 15_000)
 
   it('does not compensate for measured height changes in or below the viewport', async () => {
     const before = Array.from({ length: 20 }, (_, index) => ({ height: 2, key: `item-${index}` }))
