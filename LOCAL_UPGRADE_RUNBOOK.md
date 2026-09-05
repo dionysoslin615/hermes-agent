@@ -35,6 +35,14 @@
 - **Mandatory restart order:** stop scheduler/admission owners first and the current chat last: `crawler -> writer -> coordinator -> coder -> supporter -> auditor1 -> default`. Start the current chat first, non-scheduler Profiles next and task-admitting Profiles last: `default -> coder -> supporter -> auditor1 -> coordinator -> writer -> crawler`. After each start, require a new PID, canonical executable/source SHA, config fingerprint, expected platform state and basic response before proceeding. The default Gateway must reconnect to Telegram and prove the current control channel usable before any later Profile is started; writer/crawler must not resume Cron/Kanban admission until all earlier gates pass.
 - Before stopping `default`, install and execute a user-systemd oneshot controller whose script, state, rollback source/runtime and restart commands live outside the source tree being replaced. Arm a bounded automatic rollback timer and prove it can query/start the default unit. The controller must continue through chat disconnects, restore the old canonical source/runtime and start the same units in the same safe order on timeout/failure, then verify known-good service. A Gateway process, this Agent turn, an interactive shell, or a process below the old source tree may never be the sole restart authority.
 
+### Candidate evidence for this cycle
+
+- DLOM was stopped externally before source work. Its process tree is absent and its queue row remains truthfully `round2_running` / `round2_repair` with no completion receipt; the crawler Gateway stays stopped until the final start step.
+- Untouched upstream failed 36 local invariant regressions across Cron overlap, DingTalk media/file delivery, remote images, Kanban worker policy/isolation, read-only Skills, and unattended Browser ownership. The candidate passes the corresponding focused matrix.
+- The candidate uses one Python 3.11.15 venv and the external hash lock. Security/runtime changes are limited to the versions and retention rules recorded in LP-024; final `pip-audit` and root/website/WhatsApp npm audit each report zero known vulnerabilities.
+- Configuration bytes remain unchanged for all seven Profiles. Before/after `tools list` status and MCP visibility are identical for each Profile.
+- The external controller must still re-resolve `origin/main`, verify no business child is active, create/read back rollback material, and pass the ordered restart/live verification gates before cutover is allowed.
+
 This is an executable operating contract, not a narrative. An upgrade is not complete because code was copied, tests passed, a process started, or a browser opened. It is complete only after the exact upstream identity, minimal local delta, unique runtimes, all Profile routes, all Cron/Kanban business outcomes, delivery side effects, cleanup, rollback materials and this record have been independently read back.
 
 ## Previous closed cycle — retained historical evidence

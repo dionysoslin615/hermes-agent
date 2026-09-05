@@ -340,7 +340,9 @@ def test_max_runtime_terminates_entire_posix_worker_group(kanban_home, monkeypat
     monkeypatch.setattr(dispatch.os, "killpg", fake_killpg)
     monkeypatch.setattr(dispatch.time, "sleep", lambda _seconds: None)
 
-    conn = kb.connect()
+    from hermes_cli.kanban_db_connect import connect
+
+    conn = connect()
     try:
         tid = kb.create_task(
             conn, title="grouped long job", assignee="worker",

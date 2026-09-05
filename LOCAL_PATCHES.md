@@ -25,7 +25,18 @@ Package-contract files may differ only for the explicitly approved DingTalk SDK 
 - `pyproject.toml`
 - `uv.lock`
 - `tools/lazy_deps.py`
+- `package.json`
 - `package-lock.json`
+- `apps/desktop/package.json`
+- `website/.npmrc`
+- `website/package.json`
+- `website/package-lock.json`
+- `website/tsconfig.json`
+- `website/src/components/AutomationBlueprintsCatalog/index.tsx`
+- `website/src/components/UserStoriesCollage/index.tsx`
+- `scripts/whatsapp-bridge/package.json`
+- `scripts/whatsapp-bridge/package-lock.json`
+- `scripts/install.sh`
 
 Governance/CI-only files may also differ:
 
@@ -54,8 +65,16 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/tools/test_browser_supervisor.py`
 - `tests/tools/test_cloud_voice_integration.py` (DingTalk-only despite the historical filename)
 - `tests/tools/test_kanban_tools.py`
+- `tests/test_install_sh_uv_download_retry.py`
 
 Any other Git difference is a release blocker until either removed or entered here after the complete necessity procedure.
+
+### 2026-09-06 latest-upstream security convergence
+
+- Python canonical-runtime security pins advance only where the audited environment required them: `nemo-relay 0.8.3`, `tornado 6.5.8`, `pypdf 6.16.1`, `setuptools 83.0.0`, `torch 2.13.0+cu126`, `transformers 5.14.1`, `huggingface-hub 1.30.0`, `cuda-pathfinder 1.8.1`, and `triton 3.7.1`. Existing Bedrock support packages are promoted into the formal external runtime contract instead of being silently dropped.
+- Root Node locks converge to `electron 41.10.3` plus patched transitives; website and WhatsApp locks explicitly pin safe `nanoid 3.3.18`, `body-parser 1.20.6`, `qs 6.16.0`, `browserslist 4.28.9`, and `fast-uri 3.1.7` as applicable. The website release-age gate carries a narrow reviewed exception for `qs` because the security fix is newer than the normal 14-day floor.
+- The website TypeScript 6 compatibility changes (`React.JSX`, relative JSON import, and `ignoreDeprecations: 6.0`) are build-only and preserve rendered behavior.
+- Required gates: zero findings from final `pip-audit` and all three npm audit surfaces; CUDA execution, sentence-transformers/Qwen STT, Desktop tests/build, website typecheck/build, and WhatsApp syntax smoke.
 
 ### 2026-09-02 absorption readback
 
@@ -299,6 +318,15 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Validation:** a relocatable Python 3.11.15 candidate built from the full external hash lock conserved 262/262 distributions with only `alibabacloud-dingtalk` changing; `uv pip check`, Robot/Card/new-model imports, 51 focused DingTalk tests and five Profile configuration checks passed before cutover. Production cutover then installed exactly 2.2.57, retained the already-present gateway SPI 0.0.4, restarted only the five DingTalk Profiles, preserved the default/crawler Gateway PIDs, and read back all five platform states as connected with live TLS sockets. The final 18-file local regression matrix passed 596 tests with 8 intentional skips and zero failures.
 - **Retirement trigger:** the next immutable upstream target pins 2.2.57 or newer and passes the same conservation and DingTalk regression matrix.
 
+## LP-024 — vulnerability-free canonical locks and TypeScript 6 website compatibility
+
+- **Status:** ACTIVE-SOURCE and DEPLOYMENT-CONTRACT.
+- **Files:** root `package.json` / `package-lock.json`; `apps/desktop/package.json`; `website/.npmrc`, `package.json`, `package-lock.json`, `tsconfig.json`, and the two TSX components listed in the allowlist; `scripts/whatsapp-bridge/package.json` / `package-lock.json`; root `uv.lock`; external `~/.hermes/services/python-runtime/{requirements.in,requirements.lock,verify_runtime.py}`.
+- **Production invariant:** every lock consumed by GitHub and production is free of known audited vulnerabilities without deleting a configured provider/tool, weakening release-age policy globally, enabling task-time installers, or creating a second formal runtime.
+- **Minimal delta:** update only vulnerable/transitively required versions; use Electron `41.10.3`; carry a narrow website `qs` release-age exception; migrate website return types to `React.JSX`, use the stable relative JSON import, and acknowledge TypeScript 6 deprecation behavior. The external Python contract advances the minimum compatible GPU/security set and formally retains the pre-existing Bedrock packages.
+- **Validation:** final `pip-audit` and root/website/WhatsApp `npm audit` must each report zero vulnerabilities; `uv pip check`, CUDA execution, sentence-transformers, Qwen STT, 446 focused Python regressions, complete Cron tests, Desktop tests/build, website typecheck/build, and WhatsApp syntax smoke must pass.
+- **Retirement trigger:** a later immutable upstream target contains equivalent or newer safe locks and website TypeScript compatibility, while the external runtime verifier still proves the exact production distribution contract.
+
 ## DEPLOYMENT-CONTRACT DC-007 — compression total ceiling 1800 s on every profile
 
 - **Class:** deployment contract; no source delta (config-only).
@@ -359,3 +387,12 @@ The authoritative operational sequence, rollback rules and environment/browser c
 - **Validation:** after upgrading the governed browser stack, the complete 60-file Browser/CDP set passed as independent processes: 877 passed and one intentional OOPIF skip. Real Chrome and Lightpanda CDP validation is recorded in `LOCAL_UPGRADE_RUNBOOK.md`.
 - **Upstream tracking:** [#100983](https://github.com/NousResearch/hermes-agent/issues/100983), [#100988](https://github.com/NousResearch/hermes-agent/issues/100988), and the integration-fixture note on [#15765](https://github.com/NousResearch/hermes-agent/issues/15765).
 - **Retirement trigger:** upstream tests contain equivalent deterministic isolation and environment-sensitive sandbox setup.
+
+## CI-005 — bounded uv-installer download retry
+
+- **Class:** CI/installer-only; not imported by a running Gateway.
+- **Files:** `scripts/install.sh`, `tests/test_install_sh_uv_download_retry.py`.
+- **Invariant:** transient TLS/proxy resets while fetching the official uv installer do not fail the whole Install & Update E2E matrix on the first network error.
+- **Minimal delta:** add curl's bounded `--retry 4 --retry-all-errors --retry-delay 2` policy to the existing two-stage download; permanent errors still fail closed with the existing diagnostics.
+- **Validation:** `bash -n` plus the focused static installer regression and Install & Update E2E on the synchronized fork.
+- **Retirement trigger:** upstream carries an equivalent bounded retry around the same official installer fetch.
