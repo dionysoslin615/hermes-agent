@@ -458,14 +458,14 @@ def enforce_max_runtime(conn: sqlite3.Connection, *, signal_fn=None) -> list[str
         if signal_fn is None and os.name != "nt" and hasattr(os, "killpg"):
             with contextlib.suppress(ProcessLookupError, OSError):
                 if os.getpgid(pid) == pid:
-                    kill = os.killpg
+                    kill = os.killpg  # windows-footgun: ok — guarded by os.name and hasattr
                     group_mode = True
 
         def _worker_alive() -> bool:
             if not group_mode:
                 return _kb._pid_alive(pid)
             try:
-                os.killpg(pid, 0)
+                os.killpg(pid, 0)  # windows-footgun: ok — group_mode is POSIX-only
                 return True
             except (ProcessLookupError, OSError):
                 return False
