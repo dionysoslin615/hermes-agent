@@ -137,9 +137,22 @@ def extract_media(message: Any) -> Tuple[MessageType, List[str], List[str]]:
         # promotion here dropped native voice notes back to TEXT and skipped STT.
         if msg_type == MessageType.TEXT and any("image" in t for t in media_types):
             msg_type = MessageType.PHOTO
-    elif msg_type_str == "audio":
-        # Voice message: recognition text is already in the text. Do NOT add media_urls, or
-        # run.py's transcription enrichment overwrites it with a failed STT attempt.
+    elif msg_type_str in ("voice", "audio"):
+        # Keep DingTalk's platform recognition when present. Otherwise carry
+        # the download code into the durable local-cache/STT rail.
+        ext_content = _ext_content(message) or {}
+        recognition = str(ext_content.get("recognition") or "").strip()
+        if not recognition:
+            dl_code = (
+                ext_content.get("downloadCode")
+                or ext_content.get("download_code")
+                or ext_content.get("mediaId")
+                or ext_content.get("media_id")
+                or ""
+            )
+            if dl_code:
+                media_urls.append(dl_code)
+                media_types.append("audio")
         if msg_type == MessageType.TEXT:
             msg_type = MessageType.VOICE
     elif msg_type_str in ("file", "image"):
