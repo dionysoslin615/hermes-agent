@@ -4250,6 +4250,8 @@ _PLUGIN_COMPAT_LAZY = {
     'detect_stale_running': ('hermes_cli.kanban_db_dispatch', 'detect_stale_running'),
     'dispatch_once': ('hermes_cli.kanban_db_dispatch', 'dispatch_once'),
     'enforce_max_runtime': ('hermes_cli.kanban_db_dispatch', 'enforce_max_runtime'),
+    '_kanban_worker_skill_roots': ('hermes_cli.kanban_db_dispatch', '_kanban_worker_skill_roots'),
+    '_sandbox_kanban_worker_skills_read_only': ('hermes_cli.kanban_db_dispatch', '_sandbox_kanban_worker_skills_read_only'),
     'has_spawnable_ready': ('hermes_cli.kanban_db_dispatch', 'has_spawnable_ready'),
     'has_spawnable_review': ('hermes_cli.kanban_db_dispatch', 'has_spawnable_review'),
     'heartbeat_worker': ('hermes_cli.kanban_db_dispatch', 'heartbeat_worker'),
