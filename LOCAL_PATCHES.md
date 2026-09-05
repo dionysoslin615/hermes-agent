@@ -35,6 +35,7 @@ Governance/CI-only files may also differ:
 - `scripts/sandbox/proxy.py`, `scripts/sandbox/stage2-run.sh` and `scripts/dev-sandbox.sh` (CI-001; never imported by production runtime)
 - `.github/workflows/install-e2e.yml` and `scripts/sandbox/pick-release-tags.sh` (CI-003; never imported by production runtime)
 - `.github/workflows/ci.yaml`, `.github/workflows/e2e-desktop.yml`, `.github/workflows/js-autofix.yml`, `.github/workflows/js-tests.yml`, `.github/workflows/nix.yml`, `.github/workflows/rust-tests.yml`, `.github/workflows/tests-os.yml` and `.github/workflows/tests.yml` (fork-safe CI-only corrections; never imported by production runtime)
+- `ui-tui/src/__tests__/virtualHistoryOffsetCache.test.ts` and `web/src/pages/SessionsPage.test.tsx` (fork-runner timing-only regressions; production code unchanged)
 
 Local regression files may differ only when they directly exercise an ACTIVE-SOURCE invariant:
 

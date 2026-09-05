@@ -323,7 +323,7 @@ def test_max_runtime_terminates_entire_posix_worker_group(kanban_home, monkeypat
 
     if os.name == "nt":
         pytest.skip("POSIX process groups only")
-    import hermes_cli.kanban_db as _kb
+    import hermes_cli.kanban_db_dispatch as dispatch
 
     signals = []
     state = {"alive": True}
@@ -336,9 +336,9 @@ def test_max_runtime_terminates_entire_posix_worker_group(kanban_home, monkeypat
         if sig == 0 and not state["alive"]:
             raise ProcessLookupError
 
-    monkeypatch.setattr(_kb.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(_kb.os, "killpg", fake_killpg)
-    monkeypatch.setattr(_kb.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(dispatch.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(dispatch.os, "killpg", fake_killpg)
+    monkeypatch.setattr(dispatch.time, "sleep", lambda _seconds: None)
 
     conn = kb.connect()
     try:
@@ -348,7 +348,7 @@ def test_max_runtime_terminates_entire_posix_worker_group(kanban_home, monkeypat
         )
         kb.claim_task(conn, tid)
         worker_pid = 424242
-        kb._set_worker_pid(conn, tid, worker_pid)
+        dispatch._set_worker_pid(conn, tid, worker_pid)
         old_started = int(time.time()) - 30
         with kb.write_txn(conn):
             conn.execute(
@@ -361,7 +361,7 @@ def test_max_runtime_terminates_entire_posix_worker_group(kanban_home, monkeypat
                 (old_started, tid),
             )
 
-        assert tid in kb.enforce_max_runtime(conn)
+        assert tid in dispatch.enforce_max_runtime(conn)
         non_probe = [(pgid, sig) for pgid, sig in signals if sig != 0]
         assert non_probe[0] == (worker_pid, signal.SIGTERM)
         assert non_probe[-1] == (
