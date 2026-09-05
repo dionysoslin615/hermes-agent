@@ -1,7 +1,7 @@
 # LOCAL_PATCHES.md — production semantic delta ledger
 
 **Authority:** release-blocking, equal in force to `LOCAL_UPGRADE_RUNBOOK.md`.
-**Upstream baseline:** owner-frozen immutable `origin/main` snapshot `73f68362b3f639b97352a5dedc9e74b10520a84f` (Hermes v0.21.0; 478 upstream commits after the prior `f709bd88b6cc62b23f40e878c1d5960604302ee2` production baseline). The owner explicitly froze this SHA after the candidate had already passed, rather than continuing to chase a moving `main`; later upstream movement belongs to a later maintenance cycle.
+**Upstream baseline:** owner-authorized latest `origin/main` snapshot `9dd6634c5635321cf38840cc30e9b51226689128` (Hermes v0.21.0, unreleased main), resolved and re-fetched unchanged during the 2026-09-05 cycle. Cutover must resolve it once more; any advance requires rebasing the semantic patch series and rerunning affected gates before deployment.
 **Policy:** upstream-first. A local semantic delta survives only when current upstream lacks an equivalent, configuration/plugin/shared-service/Cron/Kanban alternatives cannot preserve the same production invariant, and a real regression test proves deletion would break an existing function. Every future upgrade must attempt retirement again before porting code.
 
 ## Allowed source-difference surface
@@ -9,14 +9,16 @@
 Only these runtime files may differ from the upstream baseline:
 
 1. `cron/scheduler.py`
-2. `cron/executions.py`
-3. `gateway/run.py`
-4. `agent/agent_init.py`
-5. `tools/kanban_tools.py`
-6. `hermes_cli/kanban_db.py`
-7. `tools/browser_use_cli.py`
-8. `plugins/platforms/dingtalk/adapter.py`
-9. `hermes_cli/config.py`
+2. `cron/scheduler_script.py`
+3. `cron/executions.py`
+4. `gateway/run_turn_runner.py`
+5. `agent/agent_init.py`
+6. `tools/kanban_tools.py`
+7. `hermes_cli/kanban_db_dispatch.py`
+8. `tools/browser_use_cli.py`
+9. `plugins/platforms/dingtalk/adapter.py`
+10. `plugins/platforms/dingtalk/inbound.py`
+11. `hermes_cli/config.py`
 
 Package-contract files may differ only for the explicitly approved DingTalk SDK pin in LP-023 and the lock-only `sanitize-html` security update recorded below:
 
@@ -32,7 +34,7 @@ Governance/CI-only files may also differ:
 - `LOCAL_UPGRADE_RUNBOOK.md`
 - `scripts/sandbox/proxy.py`, `scripts/sandbox/stage2-run.sh` and `scripts/dev-sandbox.sh` (CI-001; never imported by production runtime)
 - `.github/workflows/install-e2e.yml` and `scripts/sandbox/pick-release-tags.sh` (CI-003; never imported by production runtime)
-- `.github/workflows/ci.yaml` (CI-only correction; never imported by production runtime)
+- `.github/workflows/ci.yaml`, `.github/workflows/e2e-desktop.yml`, `.github/workflows/js-autofix.yml`, `.github/workflows/js-tests.yml`, `.github/workflows/nix.yml`, `.github/workflows/rust-tests.yml`, `.github/workflows/tests-os.yml` and `.github/workflows/tests.yml` (fork-safe CI-only corrections; never imported by production runtime)
 
 Local regression files may differ only when they directly exercise an ACTIVE-SOURCE invariant:
 
@@ -40,6 +42,7 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/cron/test_run_one_job.py`
 - `tests/cron/test_cron_script.py`
 - `tests/gateway/test_dingtalk.py`
+- `tests/gateway/test_remote_native_image_url.py`
 - `tests/hermes_cli/test_kanban_core_functionality.py`
 - `tests/hermes_cli/test_kanban_skill_readonly_sandbox.py`
 - `tests/hermes_cli/test_kanban_worker_spawn_toolsets.py`
