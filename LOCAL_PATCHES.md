@@ -266,22 +266,4 @@ For every LP on every upgrade:
 
 The authoritative operational sequence, rollback rules and environment/browser conservation checks are in `LOCAL_UPGRADE_RUNBOOK.md`.
 
-## CI-001 — trusted transparent non-fixture HTTPS in Install & Update E2E
-
-- **Class:** CI-only; not production runtime source.
-- **Files:** `scripts/sandbox/proxy.py`, `scripts/sandbox/stage2-run.sh`, `scripts/dev-sandbox.sh`.
-- **Invariant:** the real installer/update matrix must not fail because the fixture proxy performs a redundant second TLS handshake or replaces the public CA set with only the fixture CA.
-- **Upstream/fork evidence:** both upstream and the fork failed first with CONNECT relay `SSLEOFError`; after transparent tunnelling, uv correctly exposed `UnknownIssuer` because `SSL_CERT_FILE` contained only the fixture root.
-- **Minimal delta:** keep MITM only for fixture hosts, use bidirectional transparent CONNECT tunnelling for non-fixture hosts, build one CA bundle containing both the fixture CA and the runner's public roots, and point curl/OpenSSL/Git/Node at that same bundle inside stage 2.
-- **Validation:** local bidirectional CONNECT integration smoke, Python/shell validation, fork run `33237541031`, and production-commit fork run `33245992470`: update and installer routes both passed from release `v2026.5.16` to the synchronized branch.
-- **Retirement trigger:** upstream adopts an equivalent tunnel or replaces the sandbox proxy.
-
-## CI-002 — scope curl-installer npm dependencies away from Desktop
-
-- **Class:** installer/CI-only; not production runtime source.
-- **Files:** `scripts/install.sh`, `tests/test_install_sh_node_deps_failure.py`.
-- **Invariant:** the CLI installer installs the root toolchain plus `ui-tui` and `web`, but does not traverse `apps/desktop`, download Electron, or build desktop-native modules.
-- **Upstream evidence:** root `package.json` is now a workspace monorepo and already declares the intended scoped scripts; `hermes update` likewise names only `ui-tui`, `web`, and `--include-workspace-root`, while `install.sh` still ran an unscoped root `npm install`. The installer E2E therefore failed after the code update reached the workspace-era manifest.
-- **Minimal delta:** make the installer use the same explicit workspace scope and standard npm flags as the updater; preserve the existing TUI stage and failure handling.
-- **Validation:** focused installer/updater regressions `6 passed`; fork run `33237541031` passed both update and installer routes at commit `0fc5b11ce3a05daf03a447c17a82b1caecfc1b91`.
-- **Retirement trigger:** upstream scopes the root installer identically or removes the root Node dependency stage.
+No CI-only source delta is active on this target. Historical installer/sandbox experiments are not part of the production difference surface and must not be replayed automatically.
