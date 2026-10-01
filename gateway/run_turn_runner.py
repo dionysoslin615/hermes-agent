@@ -1697,7 +1697,14 @@ class TurnRunner:
             return ctx.message
         try:
             from agent.image_routing import build_native_content_parts
-            parts, skipped = build_native_content_parts(ctx.message, native_imgs)
+            image_urls = [
+                value for value in native_imgs
+                if isinstance(value, str) and value.lower().startswith(("http://", "https://"))
+            ]
+            image_paths = [value for value in native_imgs if value not in image_urls]
+            parts, skipped = build_native_content_parts(
+                ctx.message or "", image_paths=image_paths, image_urls=image_urls
+            )
             if skipped:
                 logger.warning("Native image attachment: skipped %d unreadable path(s): %s", len(skipped), skipped)
             if any(p.get("type") == "image_url" for p in parts):

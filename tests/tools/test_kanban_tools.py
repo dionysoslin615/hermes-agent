@@ -606,6 +606,29 @@ def test_create_happy_path(worker_env):
         conn.close()
 
 
+def test_kanban_worker_can_hide_create_and_link(monkeypatch, tmp_path):
+    """Worker-only profiles keep lifecycle tools while fan-out stays disabled."""
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_fake")
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    (home / "config.yaml").write_text(
+        "kanban:\n  worker_can_create_tasks: false\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    import tools.kanban_tools  # ensure registered
+    from tools.registry import invalidate_check_fn_cache, registry
+    from toolsets import resolve_toolset
+
+    invalidate_check_fn_cache()
+    schema = registry.get_definitions(set(resolve_toolset("hermes-cli")), quiet=True)
+    names = {s["function"].get("name") for s in schema if "function" in s}
+    kanban = {n for n in names if n and n.startswith("kanban_")}
+    assert "kanban_create" not in kanban
+    assert "kanban_link" not in kanban
+    assert {"kanban_show", "kanban_complete", "kanban_block", "kanban_comment"}.issubset(kanban)
+
+
 @pytest.mark.parametrize("explicit", [{"workspace_kind": "scratch"}, {"project": ""}])
 @pytest.mark.parametrize("target_scoped", [False, True])
 def test_create_explicit_scratch_ignores_ambient_board_project(

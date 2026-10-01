@@ -159,9 +159,12 @@ def _live_owner_stale_after_seconds() -> Optional[float]:
     inactivity = float(_cron_inactivity_seconds())
     if not math.isfinite(inactivity) or inactivity <= 0:
         return None
+    script_timeout = _get_script_timeout()
+    if script_timeout is None:
+        return None  # An unlimited script cannot acquire a wall-clock reclaim deadline.
     return max(
         inactivity * CLAIM_TTL_INACTIVITY_HEADROOM,
-        float(_get_script_timeout()),
+        float(script_timeout),
         LIVE_OWNER_STALE_CLAIM_FLOOR_SECONDS,
     )
 
@@ -261,6 +264,18 @@ def adopt_claimed_execution(execution_id: str) -> Optional[Dict[str, Any]]:
         record = _fetch(conn, execution_id)
     _emit_execution_state(record)
     return record
+
+
+def discard_unstarted_execution(execution_id: str) -> bool:
+    """Delete only this process's claimed placeholder when dispatch never started."""
+    with _transaction() as conn:
+        cur = conn.execute(
+            """DELETE FROM executions
+               WHERE id=? AND process_id=? AND status='claimed'
+                 AND started_at IS NULL""",
+            (execution_id, _PROCESS_ID),
+        )
+    return cur.rowcount == 1
 
 
 def mark_execution_running(execution_id: str) -> Optional[Dict[str, Any]]:

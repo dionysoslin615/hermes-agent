@@ -16,7 +16,9 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 import psutil
@@ -623,6 +625,51 @@ class TestOwnTabPreamble:
         ast.parse(bu_cli._OWN_TAB_PREAMBLE)
         # and composes with model code
         ast.parse(bu_cli._OWN_TAB_PREAMBLE + "print('x')")
+
+
+class TestRunOwnedBrowserLease:
+    def test_interactive_session_keeps_official_local_mode(self, monkeypatch):
+        monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
+        monkeypatch.delenv("HERMES_RUN_OWNED_BROWSER", raising=False)
+        assert bu_cli._run_owned_browser_requested({}) is False
+
+    def test_kanban_worker_requests_private_browser(self, monkeypatch):
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-1")
+        assert bu_cli._run_owned_browser_requested({}) is True
+
+    def test_unattended_external_cdp_owns_private_harness_runtime(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("HERMES_RUN_OWNED_BROWSER", "1")
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_PROC", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_ROOT", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_RUNTIME", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_WORKSPACE", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_URL", "")
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_NAME", "")
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
+
+        env = {"BU_CDP_URL": "http://127.0.0.1:45678"}
+        assert bu_cli._ensure_run_owned_browser(env, "cron-policy") is None
+        assert env["BU_CDP_URL"] == "http://127.0.0.1:45678"
+        assert env["BU_NAME"].startswith("hbu_")
+        runtime = Path(env["BH_RUNTIME_DIR"])
+        assert runtime.is_dir()
+        expected_runtime_parent = Path("/tmp") if os.name == "posix" else Path(tempfile.gettempdir())
+        assert runtime.parent == expected_runtime_parent
+        assert len(os.fsencode(runtime / "bu.sock")) < 104
+        assert bu_cli._RUN_OWNED_BROWSER_PROC is None
+        bu_cli._cleanup_run_owned_browser()
+        assert not runtime.exists()
+
+    def test_guard_env_covers_cli_and_browser_installers(self):
+        env = {}
+        bu_cli._apply_run_owned_browser_guards(env)
+        assert env == {
+            "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+            "UV_PYTHON_DOWNLOADS": "never",
+            "HERMES_SKIP_NODE_BOOTSTRAP": "1",
+            "HERMES_DISABLE_LAZY_INSTALLS": "1",
+        }
 
 
 class TestProviderPickerIntegration:

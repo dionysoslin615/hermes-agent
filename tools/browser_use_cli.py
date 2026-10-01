@@ -4,7 +4,14 @@ When browser.backend is "browser-use", the model gets ``browser_exec`` tool
 instead of default browser tools
 """
 
+import atexit
+import socket
+import sys
+import tempfile
+import threading
+import urllib.request
 import contextlib
+import shutil
 import importlib
 import importlib.util
 import json
@@ -171,6 +178,205 @@ def _floor_subprocess_path(path: str) -> str:
         return _merge_browser_path(path or "")
     parts = [p for p in (path or "").split(os.pathsep) if p]
     return os.pathsep.join(parts + [d for d in _FHS_BIN_DIRS if d not in set(parts) and os.path.isdir(d)])
+
+
+_RUN_OWNED_BROWSER_LOCK = threading.RLock()
+_RUN_OWNED_BROWSER_PROC: Optional[subprocess.Popen] = None
+_RUN_OWNED_BROWSER_ROOT: Optional[Path] = None
+_RUN_OWNED_BROWSER_RUNTIME: Optional[Path] = None
+_RUN_OWNED_BROWSER_WORKSPACE: Optional[Path] = None
+
+_RUN_OWNED_BROWSER_URL = ""
+
+_RUN_OWNED_BROWSER_NAME = ""
+
+_RUN_OWNED_BROWSER_GUARDS = {
+    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+    "UV_PYTHON_DOWNLOADS": "never",
+    "HERMES_SKIP_NODE_BOOTSTRAP": "1",
+    "HERMES_DISABLE_LAZY_INSTALLS": "1",
+}
+
+def _run_owned_browser_requested(env: dict) -> bool:
+    if env.get("BU_CDP_WS") or env.get("BU_CDP_URL"):
+        return False
+    if os.environ.get("BU_CDP_WS") or os.environ.get("BU_CDP_URL"):
+        return False
+    return _is_unattended_browser_worker()
+
+def _is_unattended_browser_worker() -> bool:
+    return bool(os.environ.get("HERMES_KANBAN_TASK")) or is_truthy_value(
+        os.environ.get("HERMES_RUN_OWNED_BROWSER"), default=False
+    )
+
+def _apply_run_owned_browser_guards(env: dict) -> None:
+    env.update(_RUN_OWNED_BROWSER_GUARDS)
+
+def _run_owned_child_setup() -> None:
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+            ctypes.CDLL(None).prctl(1, signal.SIGKILL, os.getppid(), 0, 0)
+        except Exception:
+            pass
+
+def _run_owned_chrome_args(env: dict) -> list[str]:
+    raw = str(env.get("AGENT_BROWSER_ARGS") or os.environ.get("AGENT_BROWSER_ARGS") or "")
+    blocked = ("--remote-debugging-port", "--remote-debugging-address", "--user-data-dir")
+    args = [part.strip() for part in raw.split(",") if part.strip()]
+    args = [arg for arg in args if not arg.startswith(blocked)]
+    if "--no-sandbox" not in args:
+        try:
+            from tools.browser_tool import _needs_chromium_sandbox_bypass
+            if _needs_chromium_sandbox_bypass():
+                args.append("--no-sandbox")
+        except Exception:
+            pass
+    if "--disable-dev-shm-usage" not in args:
+        args.append("--disable-dev-shm-usage")
+    return args
+
+def _run_owned_endpoint_live(url: str) -> bool:
+    try:
+        port = int(url.rsplit(":", 1)[-1])
+        socket.create_connection(("127.0.0.1", port), timeout=0.4).close()
+        with urllib.request.urlopen(f"{url}/json/version", timeout=1.0) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+def _cleanup_run_owned_browser() -> None:
+    global _RUN_OWNED_BROWSER_PROC, _RUN_OWNED_BROWSER_ROOT, _RUN_OWNED_BROWSER_RUNTIME
+    global _RUN_OWNED_BROWSER_WORKSPACE, _RUN_OWNED_BROWSER_URL, _RUN_OWNED_BROWSER_NAME
+    with _RUN_OWNED_BROWSER_LOCK:
+        proc, root, runtime = _RUN_OWNED_BROWSER_PROC, _RUN_OWNED_BROWSER_ROOT, _RUN_OWNED_BROWSER_RUNTIME
+        workspace, name = _RUN_OWNED_BROWSER_WORKSPACE, _RUN_OWNED_BROWSER_NAME
+        _RUN_OWNED_BROWSER_PROC = _RUN_OWNED_BROWSER_ROOT = _RUN_OWNED_BROWSER_RUNTIME = None
+        _RUN_OWNED_BROWSER_WORKSPACE = None
+        _RUN_OWNED_BROWSER_URL = _RUN_OWNED_BROWSER_NAME = ""
+    if name:
+        try:
+            cmd = [sys.executable, '-m', 'browser_harness.run']
+            if cmd:
+                stop_env = _base_subprocess_env()
+                stop_env["BU_NAME"] = name
+                if runtime is not None:
+                    stop_env["BH_RUNTIME_DIR"] = str(runtime)
+                subprocess.run([*cmd, "--reload"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=10, env=stop_env)
+        except Exception:
+            pass
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            with contextlib.suppress(Exception):
+                proc.kill()
+    for path in (root, runtime, workspace):
+        if path is not None:
+            shutil.rmtree(path, ignore_errors=True)
+
+def _set_run_owned_browser_workspace(workspace: str) -> None:
+    global _RUN_OWNED_BROWSER_WORKSPACE
+    with _RUN_OWNED_BROWSER_LOCK:
+        # The Harness lease exists for both managed and caller-owned CDP.
+        # A caller-supplied workspace is not ours to delete.
+        if _RUN_OWNED_BROWSER_RUNTIME is not None and not os.environ.get("BH_AGENT_WORKSPACE"):
+            _RUN_OWNED_BROWSER_WORKSPACE = Path(workspace)
+
+def _ensure_run_owned_browser(env: dict, task_id: Optional[str]) -> Optional[str]:
+    """Attach unattended work to a private Harness runtime and random-port Chrome."""
+    global _RUN_OWNED_BROWSER_PROC, _RUN_OWNED_BROWSER_ROOT, _RUN_OWNED_BROWSER_RUNTIME
+    global _RUN_OWNED_BROWSER_WORKSPACE, _RUN_OWNED_BROWSER_URL, _RUN_OWNED_BROWSER_NAME
+    if not _is_unattended_browser_worker():
+        return None
+    _apply_run_owned_browser_guards(env)
+    requested_name = str(env.get("BU_NAME") or f"hbu_{os.getpid()}")
+    external_endpoint = str(env.get("BU_CDP_URL") or env.get("BU_CDP_WS") or "")
+    if external_endpoint:
+        with _RUN_OWNED_BROWSER_LOCK:
+            if (_RUN_OWNED_BROWSER_RUNTIME is not None
+                    and _RUN_OWNED_BROWSER_NAME == requested_name
+                    and _RUN_OWNED_BROWSER_URL == external_endpoint):
+                env["BU_NAME"] = _RUN_OWNED_BROWSER_NAME
+                env["BH_RUNTIME_DIR"] = str(_RUN_OWNED_BROWSER_RUNTIME)
+                return None
+            _cleanup_run_owned_browser()
+            runtime = Path(tempfile.mkdtemp(prefix=f"hbu_{os.getpid()}_", dir="/tmp" if os.name == "posix" else None))
+            _RUN_OWNED_BROWSER_PROC = _RUN_OWNED_BROWSER_ROOT = None
+            _RUN_OWNED_BROWSER_RUNTIME = runtime
+            _RUN_OWNED_BROWSER_WORKSPACE = None
+            _RUN_OWNED_BROWSER_URL, _RUN_OWNED_BROWSER_NAME = external_endpoint, requested_name
+            env["BU_NAME"], env["BH_RUNTIME_DIR"] = requested_name, str(runtime)
+            return None
+    if not _run_owned_browser_requested(env):
+        return None
+    with _RUN_OWNED_BROWSER_LOCK:
+        if (_RUN_OWNED_BROWSER_PROC is not None and _RUN_OWNED_BROWSER_PROC.poll() is None
+                and _RUN_OWNED_BROWSER_NAME == requested_name
+                and _run_owned_endpoint_live(_RUN_OWNED_BROWSER_URL)):
+            env["BU_CDP_URL"] = _RUN_OWNED_BROWSER_URL
+            env["BU_NAME"] = _RUN_OWNED_BROWSER_NAME
+            if _RUN_OWNED_BROWSER_RUNTIME is not None:
+                env["BH_RUNTIME_DIR"] = str(_RUN_OWNED_BROWSER_RUNTIME)
+            return None
+        _cleanup_run_owned_browser()
+        from hermes_constants import get_default_hermes_root
+        chrome = Path(os.environ.get("AGENT_BROWSER_EXECUTABLE_PATH")
+                      or get_default_hermes_root() / "services/browser-runtime/bin/chrome")
+        if not chrome.is_file() or not os.access(chrome, os.X_OK):
+            return f"Managed Chrome is not executable at {chrome}"
+        raw_id = task_id or os.environ.get("HERMES_KANBAN_TASK") or f"worker-{os.getpid()}"
+        safe_id = _TASK_ID_SAFE_RE.sub("_", str(raw_id)).strip("._-") or "worker"
+        root = get_hermes_home() / "tmp/run-owned-browser" / f"{safe_id[-32:]}-{os.getpid()}"
+        profile = root / "profile"
+        profile.mkdir(parents=True, exist_ok=False)
+        stderr_path = root / "chrome.stderr.log"
+        args = [str(chrome), "--headless=new", "--remote-debugging-address=127.0.0.1",
+                "--remote-debugging-port=0", f"--user-data-dir={profile}", "--no-first-run",
+                "--no-default-browser-check", "--disable-background-networking",
+                "--disable-component-update", "--disable-features=Translate,MediaRouter",
+                "--window-size=1280,900", *_run_owned_chrome_args(env), "about:blank"]
+        try:
+            with stderr_path.open("wb") as stderr_file:
+                proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=stderr_file,
+                                        env=dict(env, **_RUN_OWNED_BROWSER_GUARDS),
+                                        preexec_fn=_run_owned_child_setup)
+        except Exception as exc:
+            shutil.rmtree(root, ignore_errors=True)
+            return f"Failed to launch managed Chrome: {exc}"
+        port_file, deadline, url = profile / "DevToolsActivePort", time.monotonic() + 15, ""
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                port = int(port_file.read_text(encoding="utf-8").splitlines()[0])
+                if port in range(9222, 9229):
+                    raise RuntimeError(f"Chrome selected reserved fixed CDP port {port}")
+                candidate = f"http://127.0.0.1:{port}"
+                if _run_owned_endpoint_live(candidate):
+                    url = candidate
+                    break
+            except (OSError, ValueError, IndexError):
+                pass
+            time.sleep(0.1)
+        if not url:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            detail = ""
+            with contextlib.suppress(OSError):
+                detail = stderr_path.read_text(encoding="utf-8", errors="replace")[-1000:]
+            shutil.rmtree(root, ignore_errors=True)
+            return f"Managed Chrome did not expose a random CDP endpoint: {detail}"
+        runtime = Path(tempfile.mkdtemp(prefix=f"hbu_{os.getpid()}_", dir="/tmp" if os.name == "posix" else None))
+        _RUN_OWNED_BROWSER_PROC, _RUN_OWNED_BROWSER_ROOT = proc, root
+        _RUN_OWNED_BROWSER_RUNTIME, _RUN_OWNED_BROWSER_WORKSPACE = runtime, None
+        _RUN_OWNED_BROWSER_URL, _RUN_OWNED_BROWSER_NAME = url, requested_name
+        env["BU_CDP_URL"], env["BU_NAME"], env["BH_RUNTIME_DIR"] = url, requested_name, str(runtime)
+        return None
+
+atexit.register(_cleanup_run_owned_browser)
 
 
 def _read_browser_cfg() -> dict:
@@ -412,6 +618,13 @@ def _resolve_local_engine_cdp(env: dict, task_id: Optional[str], session_name: s
     err = _resolve_lightpanda_cdp(env, task_id, session_name)
     if err or _has_cdp_env(env):
         return err
+    # Approved unattended lease owns the configured Chrome directly. Resolve it
+    # before the built-in agent-browser cache: Harness does not use that CLI.
+    err = _ensure_run_owned_browser(env, task_id)
+    if err or _has_cdp_env(env):
+        if not err:
+            env[_PRIVATE_BROWSER_SENTINEL] = "1"
+        return err
     return _resolve_managed_chromium_cdp(env, task_id, session_name)
 
 
@@ -618,6 +831,10 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
         return tool_error(route_err)
     bot_desktop_browser = bool(env.pop(_BOT_DESKTOP_BROWSER_SENTINEL, None))
 
+    run_owned_err = _ensure_run_owned_browser(env, task_id)
+    if run_owned_err:
+        return tool_error(run_owned_err)
+
     # SHARED browser (/browser connect CDP override): pin each named session to its own tab (see
     # _OWN_TAB_PREAMBLE). Private per-name browsers skip this — nothing to collide with.
     private_browser = env.pop(_PRIVATE_BROWSER_SENTINEL, None)  # always pop: never exported to the CLI
@@ -627,6 +844,7 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     workspace = _workspace_dir(task_id)
     if workspace:
         env["BH_AGENT_WORKSPACE"] = workspace
+        _set_run_owned_browser_workspace(workspace)
 
     # BU_AUTOSPAWN makes the CLI start a Browser Use cloud browser when no local
     # Chrome/CDP endpoint is reachable (their API key authenticates it)

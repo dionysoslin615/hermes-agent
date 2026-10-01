@@ -102,6 +102,28 @@ def _check_kanban_orchestrator_mode() -> bool:
     return _visible(to_env_worker=False)
 
 
+def _worker_can_create_tasks() -> bool:
+    """Whether this dispatcher worker may create/link follow-up tasks."""
+    try:
+        val = (load_config().get("kanban") or {}).get("worker_can_create_tasks", True)
+    except Exception:
+        return True
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(val)
+
+
+@no_cache_check_fn
+def _check_kanban_create_mode() -> bool:
+    if _is_delegated_child_context():
+        return False
+    if os.environ.get("HERMES_KANBAN_TASK") and _is_dispatcher_owned_worker():
+        return _worker_can_create_tasks()
+    return _profile_has_kanban_toolset()
+
+
 # --- Shared helpers: validation failures raise _Reject; _kanban_handler renders it ---
 
 # Worker tools that terminate or transition a run's ownership. An unbound worker
@@ -1033,6 +1055,9 @@ def _persisted_session_id(session_id: Optional[str]) -> Optional[str]:
 def _handle_create(args: dict, **kw) -> str:
     """Create a (child) task; orchestrator workers use this to fan out."""
     _reject_delegated_child_mutation("kanban_create")
+    _check(
+        not os.environ.get("HERMES_KANBAN_TASK") or _worker_can_create_tasks(),
+        "kanban_create is disabled for this worker profile (kanban.worker_can_create_tasks=false).")
     title = _require_text(args, "title")
     assignee = args.get("assignee")
     _check(assignee, "assignee is required — name the profile that should execute this "
@@ -1185,6 +1210,9 @@ def _handle_link(args: dict, **kw) -> str:
     children → ValueError). A worker linking its OWN running card proves ownership
     with its run id so the dependency-block handoff still works."""
     _reject_delegated_child_mutation("kanban_link")
+    _check(
+        not os.environ.get("HERMES_KANBAN_TASK") or _worker_can_create_tasks(),
+        "kanban_link is disabled for this worker profile (kanban.worker_can_create_tasks=false).")
     parent_id = args.get("parent_id")
     child_id = args.get("child_id")
     _check(parent_id and child_id, "both parent_id and child_id are required")
@@ -1217,6 +1245,9 @@ _TOOLS = (
     ("kanban_link", KANBAN_LINK_SCHEMA, _handle_link, "🔗"))
 
 for _name, _sch, _handler, _emoji in _TOOLS:
-    _gate = _check_kanban_orchestrator_mode if _name in _ORCHESTRATOR_TOOLS else _check_kanban_mode
+    if _name in {"kanban_create", "kanban_link"}:
+        _gate = _check_kanban_create_mode
+    else:
+        _gate = _check_kanban_orchestrator_mode if _name in _ORCHESTRATOR_TOOLS else _check_kanban_mode
     registry.register(name=_name, toolset="kanban", schema=_sch, handler=_handler, emoji=_emoji,
                       check_fn=_gate)

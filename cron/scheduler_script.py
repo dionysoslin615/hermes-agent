@@ -64,22 +64,43 @@ def _timeout_from_env_or_config(
     return None
 
 
-def _get_script_timeout() -> int:
-    """Resolve cron pre-run script timeout from module/env/config with a safe default."""
+def _get_script_timeout() -> Optional[int]:
+    """Resolve cron pre-run script timeout; zero means no deadline."""
     if _sched._SCRIPT_TIMEOUT != _sched._DEFAULT_SCRIPT_TIMEOUT:
         try:
-            timeout = _positive_int(_sched._SCRIPT_TIMEOUT)
-            if timeout is not None:
+            timeout = int(float(_sched._SCRIPT_TIMEOUT))
+            if timeout == 0:
+                return None
+            if timeout > 0:
                 return timeout
         except Exception:
             logger.warning(
                 "Invalid patched _SCRIPT_TIMEOUT=%r; using env/config/default",
                 _sched._SCRIPT_TIMEOUT)
-    resolved = _timeout_from_env_or_config(
-        "HERMES_CRON_SCRIPT_TIMEOUT", "script_timeout_seconds", _positive_int,
-        "cron script timeout",
-    )
-    return _sched._DEFAULT_SCRIPT_TIMEOUT if resolved is None else resolved
+    env_value = cron_env_setting("HERMES_CRON_SCRIPT_TIMEOUT").strip()
+    if env_value:
+        try:
+            timeout = int(float(env_value))
+            if timeout == 0:
+                return None
+            if timeout > 0:
+                return timeout
+        except Exception:
+            logger.warning(
+                "Invalid HERMES_CRON_SCRIPT_TIMEOUT=%r; using config/default", env_value)
+    try:
+        cfg = _sched.load_config() or {}
+        cron_cfg = cfg.get("cron", {}) if isinstance(cfg, dict) else {}
+        configured = cron_cfg.get("script_timeout_seconds")
+        if configured is not None:
+            timeout = int(float(configured))
+            if timeout == 0:
+                return None
+            if timeout > 0:
+                return timeout
+    except Exception as exc:
+        logger.debug("Failed to load cron script timeout from config: %s", exc)
+    return _sched._DEFAULT_SCRIPT_TIMEOUT
 
 
 _DEFAULT_MEDIA_SEND_TIMEOUT = 300
@@ -487,7 +508,7 @@ def _run_job_script(
         proc = subprocess.Popen(
             argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             cwd=workdir or str(path.parent), env=env, **popen_kwargs)
-        deadline = time.monotonic() + script_timeout
+        deadline = None if script_timeout is None else time.monotonic() + script_timeout
         while True:
             # Tree-kill on cancel AND timeout: killpg misses setsid grandchildren (watchdogs,
             # backgrounded shell jobs); kill_process_tree snapshots descendants BEFORE signalling.
@@ -495,8 +516,8 @@ def _run_job_script(
                 _terminate_cron_script_tree(proc)
                 _drain_script_pipes(proc)
                 return False, "Script cancelled because cron fire ownership was lost"
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
                 _terminate_cron_script_tree(proc)
                 _drain_script_pipes(proc)
                 # Phase 4a (#85125): a script timeout must leave ZERO living descendants. killpg only
@@ -507,7 +528,8 @@ def _run_job_script(
                 # tree-kill (#85147, d6a5cb9725).
                 return False, f"Script timed out after {script_timeout}s: {path}"
             try:
-                stdout_raw, stderr_raw = proc.communicate(timeout=min(0.1, remaining))
+                stdout_raw, stderr_raw = proc.communicate(
+                    timeout=0.1 if remaining is None else min(0.1, remaining))
                 break
             except subprocess.TimeoutExpired:
                 continue

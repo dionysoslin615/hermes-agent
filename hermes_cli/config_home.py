@@ -41,7 +41,12 @@ def _ensure_directory(path: Path, *, create: bool, secure: bool, home: Path) -> 
             raise FileNotFoundError(f"Required directory does not exist: {path}")
         # The operator owns permissions beyond a link, including logs/curator.
         if secure and not _operator_owned_links(links, home):
-            _secure_dir(path)
+            # Preserve an operator's explicit skills lock; secure fresh/writable roots normally.
+            if path == home / "skills" and path.stat().st_mode & 0o222 == 0:
+                from hermes_constants import _chown_to_hermes_uid
+                _chown_to_hermes_uid(path)
+            else:
+                _secure_dir(path)
     except OSError as exc:
         raise HomeInitializationError(
             f"Cannot initialize Hermes directory {path}: {exc}. "
