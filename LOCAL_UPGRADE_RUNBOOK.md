@@ -271,8 +271,10 @@ CI-only and package-lock differences are audited separately from production runt
 - Discover target-supported Python range and every real consumer; never freeze the previous interpreter as permanent.
 - Build a fresh Candidate environment through the exact selected interpreter/package manager.
 - Treat Python virtual environments as non-relocatable: console-script shebangs embed the build path. A Candidate venv may prove the lock, but production must be synchronized or recreated at its final canonical path while Gateways are stopped; never rename a built venv across paths.
-- Preserve approved external consumer packages through a formal input/hash contract rather than silently adding them to upstream metadata.
-- Synchronize the Candidate from that external hash contract. Project-level `uv sync`, including `--all-extras`, is not production dependency conservation and may not substitute for the external contract.
+- Preserve approved external consumer packages in a PM-managed plugin manifest rather than silently adding them to upstream metadata or manually installing into the selected venv.
+- Resolve the selected PM environment at launch from the active install metadata; never embed an environment ID in a production script, Cron prompt, Profile config, or systemd unit.
+- Every external unit must declare any non-system executable directories it consumes (for example a package-manager-owned compiler) in its own `PATH`; an interactive-shell PATH or a previous process generation is not deployment evidence.
+- Install/synchronize the Candidate through Hermes PM from that external manifest. Project-level `uv sync`, including `--all-extras`, is not production dependency conservation and may not substitute for the PM/plugin contract.
 - Run the external runtime verifier against Candidate, then use the Candidate interpreter to execute clean import/startup smokes for every enabled no-agent Cron Runner before Cron admission is restored. A green Hermes suite or `cron doctor` cannot prove Runner imports.
 - Run dependency integrity, clean imports, CLI protocol, and actual consumer smokes.
 - A separate Browser Use/tool environment remains only if current dependency **and real stdin/CLI protocol** compatibility cannot coexist and that exception was already authorized.
