@@ -244,6 +244,16 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Validation:** `npm install` and `npm ls --all --depth=0` succeed; root `npm audit --json` returns zero vulnerabilities and exit zero; Desktop typecheck/lint exits zero; UI tests pass `1124` files / `9930` tests; Electron-platform tests pass `336` files / `3181` tests with six files and sixteen tests intentionally skipped; the focused relay test passes; and the Electron 41 Linux x64 production build and package test complete. Existing non-error lint warnings and the optional HUD X11 native-build degradation are reported, not converted into false failures or hidden by dependency changes.
 - **Retirement trigger:** a later authorized Hermes target already contains an equal-or-stronger audited dependency graph and preserves the relay contract; re-prove from that target rather than blindly carrying these exact pins.
 
+## LP-024 — idempotent Gateway `LD_LIBRARY_PATH` generation
+
+- **Status:** ACTIVE-SOURCE.
+- **File / symbol:** `hermes_cli/gateway.py::_ld_library_path_line`; focused regression in `tests/hermes_cli/test_gateway_service.py`.
+- **Production invariant:** regenerating or comparing the systemd unit preserves the first occurrence and order of every non-empty loader path but never carries duplicate components forward. Equivalent shell and installed-unit inputs must converge to one stable definition.
+- **Failure evidence:** the live user unit contained the same OpenMPI, NCCL and CUDA triplet twice. Because `_ld_library_path_line` copied every colon component verbatim, `systemd_unit_is_current()` generated a different expected unit and `hermes gateway status` permanently reported `Installed gateway service definition is outdated` despite an otherwise healthy service.
+- **Minimal delta:** order-preserving de-duplication before and after target-user path remapping; quoting, installed-unit fallback and all unique path values remain unchanged.
+- **Validation:** the regression first failed with a count of two and then passed. The live unit diff contained only removal of the repeated triplet; `systemctl --user daemon-reload` retained Gateway PID `655113`, and the subsequent status readback no longer reported an outdated definition.
+- **Retirement trigger:** an authorized later target performs equivalent order-preserving normalization in the generator and passes the production reproduction.
+
 ## DEPLOYMENT-CONTRACT DC-007 — compression total ceiling 1800 s on every profile
 
 - **Class:** deployment contract; no source delta (config-only).
@@ -316,6 +326,16 @@ Any other Git difference is a release blocker until either removed or entered he
 - **Auditor2 Alibaba CN route:** only auditor2 owns the `alibaba-token-plan-cn` web-search, web-extract and image-generation adapters and the `ALIBABA_TOKEN_PLAN_CN_API_KEY` reference. Other Profiles must have neither the plugin nor that selected provider. Validate each capability through auditor2's real runtime; generated paid-test media must be byte-checked and then removed.
 - **Firecrawl boundary:** Crawler Firecrawl remains a distinct configured extraction route. A quota failure may be retried after recharge, but must not be silently replaced by a browser or another backend. The 2026-10-02 fresh session `20261002_131841_ab8c9b` returned `FIRECRAWL_EXTRACT_OK`, and its Crawler `state.db` tool chain contains the real extraction result.
 - **Upgrade gate:** hash the Profile-local adapters/tests, prove only the intended Profile can select them, run fresh sessions through each selected backend, read the tool-call chain from the owning Profile store, and remove temporary media/backups. Do not modify official provider or Skill source to preserve these routes.
+
+## DEPLOYMENT-CONTRACT DC-016 — MA Crawl isolated runtime and failure classification
+
+- **Class:** external Crawler runner contract; no official Skill or Hermes upstream source is modified by this contract.
+- **Files:** `~/.hermes/profiles/crawler/scripts/ma-crawl-runner.py` and its Profile-local tests.
+- **Invariant:** the isolated Agent is launched by the stable Python service entry with `-I`, an explicit frozen Hermes source root and `hermes_cli.main.main()`. A nonzero pre-session failure carrying an import, unwritable install-state, missing site-packages or missing committed dependency-environment fingerprint is a deterministic launch/configuration failure and exits `78` immediately. Provider, browser and business incompleteness retain same-session durable convergence semantics; arbitrary attempt, duration or no-progress quotas are not introduced.
+- **Failure evidence:** the 2026-10-02 08:00 natural fire resolved dependencies inside its isolated `HOME/HERMES_HOME`, failed before creating a session with `ModuleNotFoundError: No module named 'ruamel'`, and retried the identical startup failure 866 times through 15:15. Process, scope and Chrome existence were incorrectly treated as health until audit/session/database evidence disproved progress.
+- **Repair:** bypass isolated PM re-resolution for this runner, use `/home/dionysos/.hermes/services/python-runtime/python -I -c` with `/home/dionysos/.hermes/hermes-agent` inserted explicitly, and classify only pre-session deterministic launcher fingerprints as fatal configuration errors. Signal cleanup remains responsible for the run-owned Chrome process group, CDP listener, Browser Harness runtime, profile and run directory.
+- **Validation gate:** require focused fail-fast/runtime tests, business-completion and semantic-conservation suites, then one explicitly authorized real Cron execution. Completion requires a terminal execution state plus Agent session, three-exchange official-page evidence, checkpoint/receipt conservation, database integrity and zero run-owned process/listener/directory residue; CLI exit or PID presence alone is never acceptance.
+- **Upgrade gate:** after any PM, launcher, sandbox, Python or Hermes-home change, rerun the isolated import/runtime smoke before the next natural fire. Never use a completed business day as an unapproved production replay merely to clear diagnostics.
 
 ---
 

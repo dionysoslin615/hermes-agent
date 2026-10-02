@@ -363,6 +363,30 @@ class TestGeneratedSystemdUnits:
         monkeypatch.delenv("LD_LIBRARY_PATH")
         assert "LD_LIBRARY_PATH" not in gateway_cli.generate_systemd_unit(system=False)
 
+    def test_user_unit_deduplicates_ld_library_path_components(self, monkeypatch, tmp_path):
+        """Repeated status/install generation must not preserve duplicate loader paths forever."""
+        monkeypatch.setattr(
+            gateway_cli,
+            "get_systemd_unit_path",
+            lambda system=False: tmp_path / "hermes-gateway.service",
+        )
+        hermes_home = tmp_path / "hermes-home"
+        monkeypatch.setattr(gateway_cli, "get_hermes_home", lambda: hermes_home)
+        monkeypatch.setattr(gateway_cli, "get_python_path", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(gateway_cli, "_stable_service_working_dir", lambda: str(hermes_home))
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setenv(
+            "LD_LIBRARY_PATH",
+            "/usr/local/openmpi/lib:/usr/local/nccl/lib:/usr/local/cuda/lib64:"
+            "/usr/local/openmpi/lib:/usr/local/nccl/lib:/usr/local/cuda/lib64",
+        )
+
+        line = gateway_cli._ld_library_path_line(system=False)
+
+        assert line.count("/usr/local/openmpi/lib") == 1
+        assert line.count("/usr/local/nccl/lib") == 1
+        assert line.count("/usr/local/cuda/lib64") == 1
+
 
     def test_launchd_plist_persists_configured_nofile_soft_limit(self, monkeypatch):
         """The generated plist must carry SoftResourceLimits/NumberOfFiles so a

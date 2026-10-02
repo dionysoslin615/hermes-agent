@@ -3073,9 +3073,11 @@ def _ld_library_path_line(system: bool, target_home_dir: str | None = None) -> s
     start/restart/status, and a shell without the export (ssh, cron, ``sudo`` strips ``LD_*``)
     must not be able to "repair" the line away."""
     raw = os.environ.get("LD_LIBRARY_PATH", "") or _installed_unit_ld_library_path(system)
-    components = [p for p in raw.split(":") if p]
+    components = list(dict.fromkeys(p for p in raw.split(":") if p))
     if target_home_dir is not None:
-        components = [_remap_path_for_user(p, target_home_dir) for p in components]
+        components = list(dict.fromkeys(
+            _remap_path_for_user(p, target_home_dir) for p in components
+        ))
     return _systemd_env_line("LD_LIBRARY_PATH", ":".join(components)) if components else ""
 
 
