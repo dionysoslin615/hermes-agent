@@ -24,8 +24,11 @@ beforeAll(async () => {
   writeFileSync(
     preload,
     `
-    import { readFileSync } from 'node:fs'
-    import { registerHooks } from 'node:module'
+    import fs, { readFileSync } from 'node:fs'
+    import { registerHooks, syncBuiltinESMExports } from 'node:module'
+    const realExistsSync = fs.existsSync
+    fs.existsSync = path => path === '/proc/driver/nvidia/version' ? false : realExistsSync(path)
+    syncBuiltinESMExports()
     Object.defineProperty(process, 'platform', { value: 'linux' })
     if (process.argv.some(arg => arg.startsWith('--ozone-platform='))) {
       console.log(JSON.stringify({ relaunched: process.argv.slice(2) }))
