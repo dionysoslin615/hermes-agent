@@ -93,6 +93,14 @@ Official references to read fresh each cycle as applicable:
 - Successful production ends with one canonical Hermes source, environment, and launcher; bounded alternatives exist only during the active transaction.
 - Secrets are never printed. Record key names/presence and `[REDACTED]` only.
 
+### 4.6 Browser runtime and optional-backend policy
+
+- Treat browser automation as four separate layers: model-facing tool, Browser Use/Browser Harness driver, selected browser source, and optional `agent-browser` backend. Absence of one optional layer does not invalidate another route that passed a real navigation.
+- This deployment's formal route is Browser Use/Browser Harness through the shared stable Chrome entry. PM `agent-browser` and PM Chromium are intentionally declined optional components. A `? ... not installed` line from `hermes pm doctor` with exit zero, or the optional warning row in `hermes doctor`, is not an upgrade defect and must never trigger an installation recommendation by itself.
+- Before proposing `hermes pm install agent-browser --tools-only`, read the live PM dependency graph. If the package closure includes Chromium while an independently managed verified Chrome already exists, installation creates a duplicate browser owner and is prohibited without an explicit owner requirement for that backend and a complete migration/retirement plan.
+- Do not rewrite Profile, Cron or Kanban definitions merely to preserve the shared browser surface. Validate the actual consumers: one harmless `browser_exec` navigation under the selected route, unattended task-private runtime/profile behavior, PAC where required, random CDP allocation and zero process/socket/profile residue.
+- Never delete the existing browser runtime while any Runner, Browser Harness session or independently supervised workload consumes its stable entry. A compatibility symlink to the same inode/bytes is not a duplicate installation; a distinct engine such as Lightpanda is not a duplicate Chromium.
+
 ## 5. External control architecture
 
 A fleet update is controlled outside every Hermes Gateway. Hermes Cron cannot be the sole controller because the update stops/replaces Hermes itself.
@@ -599,3 +607,4 @@ The decisive cause was therefore **incomplete fleet/runtime contract capture fol
 6. Never restore all paused jobs as a batch. Restore one authorized job from its own checkpoint, obtain two-point business progress and side-effect readback, then advance to the next.
 7. Preserve forensic history while removing executable residue. A historical environment ID in a log is not an active consumer; an executable reference, process mapping or enabled unit is.
 8. After a failed upgrade, keep the formal result `NOT_FULLY_CLOSED` until production work, documentation, cleanup and final notification all agree.
+9. Browser diagnostics must distinguish optional-component inventory from functional health. On this deployment, Browser Use/Browser Harness plus the stable external Chrome runtime is the accepted production path; PM `agent-browser`/Chromium remains intentionally absent. Do not repeatedly ask the owner to install it, do not count that absence as an error, and do not install it to silence a warning. Reopen only on an explicit new backend requirement followed by full consumer migration and single-runtime proof.
