@@ -16,6 +16,19 @@ Only these runtime files may differ from the upstream baseline:
 6. `hermes_cli/kanban_db_dispatch.py`
 7. `tools/browser_use_cli.py`
 8. `tools/kanban_tools.py`
+9. `hermes_cli/gateway.py` — only the LP-024 idempotent `LD_LIBRARY_PATH` delta.
+
+LP-023 permits the following frozen-target dependency and Desktop compatibility artifacts only; this is not permission to change other runtime semantics:
+
+- `package.json`
+- `package-lock.json`
+- `apps/desktop/package.json`
+- `tests-js/package.json`
+- `ui-tui/package.json`
+- `web/package.json`
+- `apps/desktop/scripts/bundle-electron-main.test.mjs`
+- `apps/desktop/src/plugins/hermes-bots/relay.test.ts`
+- `locales/_keys.desktop.json`
 
 Governance/CI-only files may also differ:
 
@@ -31,6 +44,7 @@ Local regression files may differ only when they directly exercise an ACTIVE-SOU
 - `tests/hermes_cli/test_kanban_core_functionality.py`
 - `tests/hermes_cli/test_kanban_skill_readonly_sandbox.py`
 - `tests/hermes_cli/test_config.py`
+- `tests/hermes_cli/test_gateway_service.py` — the LP-024 duplicate-loader-path regression only.
 - `tests/tools/test_browser_use_cli.py`
 - `tests/tools/test_kanban_tools.py`
 
