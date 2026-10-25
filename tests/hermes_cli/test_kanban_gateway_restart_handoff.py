@@ -181,8 +181,12 @@ def test_oneshot_unit_dispatcher_scope_wraps_or_warns_never_dooms_silently(
     monkeypatch.setattr(process_registry, "_scope_degraded_warned", False)
     with caplog.at_level("WARNING", logger=process_registry.logger.name):
         kbd._default_spawn(task, str(workspace))
-    # Unwrapped: the bare worker argv (the profile owner executes; this client waits for its receipt).
-    assert spawned[-1] == [sys.executable, "-m", "hermes_cli.kanban_worker_client"]
+    # No systemd scope, but the independent read-only skill sandbox remains.
+    assert spawned[-1][0].endswith("bwrap")
+    separator = spawned[-1].index("--")
+    assert spawned[-1][separator + 1 :] == [
+        sys.executable, "-m", "hermes_cli.kanban_worker_client"
+    ]
     warned = [r.getMessage() for r in caplog.records if "KILLED when the unit exits" in r.getMessage()]
     assert len(warned) == 1 and "KillMode=process" in warned[0]
 

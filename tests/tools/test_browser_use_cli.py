@@ -17,7 +17,9 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 import psutil
@@ -640,6 +642,45 @@ class TestBackendCdpResolution:
         env = {}
         assert bu_cli._resolve_backend_cdp(env, "t1") is None
         assert env["BU_CDP_WS"] == "wss://gateway.example/cdp/legacy"
+
+
+class TestRunOwnedBrowserLease:
+    def test_interactive_session_keeps_official_local_mode(self, monkeypatch):
+        monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
+        monkeypatch.delenv("HERMES_RUN_OWNED_BROWSER", raising=False)
+        assert bu_cli._run_owned_browser_requested({}) is False
+
+    def test_kanban_worker_requests_private_browser(self, monkeypatch):
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "task-1")
+        assert bu_cli._run_owned_browser_requested({}) is True
+
+    def test_cleanup_removes_only_owned_browser_state(self, tmp_path, monkeypatch):
+        root = tmp_path / "owned-browser"
+        runtime = root / "runtime"
+        runtime.mkdir(parents=True)
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        marker = workspace / "result.txt"
+        marker.write_text("keep", encoding="utf-8")
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_PROC", None)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_ROOT", root)
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_URL", "")
+        monkeypatch.setattr(bu_cli, "_RUN_OWNED_BROWSER_NAME", "")
+
+        bu_cli._cleanup_run_owned_browser()
+
+        assert not root.exists()
+        assert marker.read_text(encoding="utf-8") == "keep"
+
+    def test_guard_env_covers_cli_and_browser_installers(self):
+        env = {}
+        bu_cli._apply_run_owned_browser_guards(env)
+        assert env == {
+            "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+            "UV_PYTHON_DOWNLOADS": "never",
+            "HERMES_SKIP_NODE_BOOTSTRAP": "1",
+            "HERMES_DISABLE_LAZY_INSTALLS": "1",
+        }
 
 
 class TestOwnTabPreamble:

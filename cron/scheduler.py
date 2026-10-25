@@ -4248,8 +4248,8 @@ def _process_due_job(job: dict, adapters, loop, verbose: bool) -> bool:
             job["execution_id"], job["id"], f"Fire claim failed: {type(exc).__name__}: {exc}")
         raise
     if not claimed:
-        finish_execution(
-            job["execution_id"], success=False, error="Fire claim lost; execution was not started.")
+        settle_unstarted_execution(
+            job["execution_id"], job["id"], "Fire claim lost; execution was not started.")
         return True
     # CAS returns the persisted record; bool fallback only for older test doubles.
     claimed_job = dict(claimed) if isinstance(claimed, dict) else dict(job)

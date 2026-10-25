@@ -163,9 +163,12 @@ def _live_owner_stale_after_seconds() -> Optional[float]:
     inactivity = float(_cron_inactivity_seconds())
     if not math.isfinite(inactivity) or inactivity <= 0:
         return None
+    script_timeout = _get_script_timeout()
+    if script_timeout is None:
+        return None
     return max(
         inactivity * CLAIM_TTL_INACTIVITY_HEADROOM,
-        float(_get_script_timeout()),
+        float(script_timeout),
         LIVE_OWNER_STALE_CLAIM_FLOOR_SECONDS,
     )
 

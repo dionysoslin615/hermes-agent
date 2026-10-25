@@ -696,6 +696,15 @@ def test_default_spawn_does_not_auto_load_any_skill(kanban_home, monkeypatch):
         return FakeProc()
 
     monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr(kbd, "_sandbox_kanban_worker_skills_read_only", lambda cmd, _env: cmd)
+    monkeypatch.setattr(kbd, "_restart_safe_worker_argv", lambda _task, cmd: cmd)
+    # A detached worker must not inherit current or future session/Gateway
+    # routing keys from the dispatcher's ambient process.
+    monkeypatch.setenv("HERMES_SESSION_CHAT_ID", "stale-chat")
+    monkeypatch.setenv("HERMES_SESSION_FUTURE_KEY", "stale-session")
+    monkeypatch.setenv("HERMES_GATEWAY_FUTURE_KEY", "stale-gateway")
+    monkeypatch.setenv("HERMES_UI_SESSION_ID", "stale-ui")
+    monkeypatch.setenv("_HERMES_GATEWAY", "stale-legacy")
 
     conn = kbc.connect()
     try:
@@ -717,6 +726,15 @@ def test_default_spawn_does_not_auto_load_any_skill(kanban_home, monkeypatch):
     env = captured["env"]
     assert env.get("HERMES_KANBAN_TASK") == tid
     assert env.get("HERMES_PROFILE") == "some-profile"
+    assert env.get("HERMES_SESSION_SOURCE") == "kanban"
+    for key in (
+        "HERMES_SESSION_CHAT_ID",
+        "HERMES_SESSION_FUTURE_KEY",
+        "HERMES_GATEWAY_FUTURE_KEY",
+        "HERMES_UI_SESSION_ID",
+        "_HERMES_GATEWAY",
+    ):
+        assert key not in env
 
 
 # ---------------------------------------------------------------------------

@@ -55,6 +55,26 @@ def test_tick_skips_job_when_durable_fire_claim_is_lost(monkeypatch):
     assert calls == []
 
 
+def test_process_due_job_settles_lost_fire_claim_with_upstream_helper(monkeypatch):
+    """A post-ledger claim loss must become an auditable terminal receipt."""
+    settled = []
+    monkeypatch.setattr(s, "claim_job_for_fire", lambda *_a, **_kw: False)
+    monkeypatch.setattr(s, "settle_unstarted_execution", lambda *args: settled.append(args))
+    monkeypatch.setattr(
+        s,
+        "finish_execution",
+        lambda *_a, **_kw: pytest.fail("must use the upstream settlement helper"),
+    )
+
+    assert s._process_due_job(
+        {"id": "j1", "name": "t", "execution_id": "exec-j1"},
+        adapters=None,
+        loop=None,
+        verbose=False,
+    ) is True
+    assert settled == [("exec-j1", "j1", "Fire claim lost; execution was not started.")]
+
+
 def test_run_one_job_success_sequence(monkeypatch):
     """The extracted helper runs the same execute→save→enqueue→mark sequence
     for a successful job."""

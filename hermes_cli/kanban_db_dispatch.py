@@ -11,6 +11,7 @@ import contextlib
 import os
 import re
 import signal
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from typing import Optional
 from typing import TYPE_CHECKING
 
 from hermes_cli.quiet_single_query import KANBAN_WORKER_EXIT_TRAILER
+from hermes_platform.resolver import locate_command
 
 if TYPE_CHECKING:
     from hermes_cli.kanban_db import Task
@@ -2752,6 +2754,72 @@ def _restart_safe_worker_argv(task: Task, command: list[str]) -> list[str]:
     ).argv
 
 
+def _kanban_worker_skill_roots(env: dict[str, str]) -> list[Path]:
+    """Return every configured skill root visible to a dispatched worker."""
+    from hermes_constants import get_default_hermes_root
+    from agent.skill_utils import yaml_load
+
+    default_root = get_default_hermes_root().expanduser()
+    profile_root = Path(env.get("HERMES_HOME") or default_root).expanduser()
+    candidates = [default_root / "skills", profile_root / "skills"]
+    profiles_root = default_root / "profiles"
+    if profiles_root.is_dir():
+        candidates.extend(p / "skills" for p in profiles_root.iterdir() if p.is_dir())
+    for config_path in {default_root / "config.yaml", profile_root / "config.yaml"}:
+        try:
+            raw = yaml_load(config_path.read_text(encoding="utf-8")) or {}
+            external = (raw.get("skills") or {}).get("external_dirs") or []
+        except (OSError, TypeError, ValueError):
+            external = []
+        for value in external:
+            if isinstance(value, str) and value.strip():
+                root = Path(os.path.expandvars(os.path.expanduser(value.strip())))
+                if not root.is_dir():
+                    raise RuntimeError(
+                        "Kanban skill write isolation unavailable: configured "
+                        f"external skill root does not exist: {root}"
+                    )
+                candidates.append(root)
+    protected: set[Path] = set()
+    for candidate in candidates:
+        try:
+            root = candidate.resolve()
+        except OSError:
+            continue
+        if not root.is_dir():
+            continue
+        protected.add(root)
+        for current, dirs, files in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            for name in [*dirs, *files]:
+                link = current_path / name
+                if link.is_symlink():
+                    with contextlib.suppress(OSError):
+                        target = link.resolve(strict=True)
+                        protected.add(target if target.is_dir() else target.parent)
+    return sorted(protected, key=lambda path: (len(path.parts), str(path)))
+
+
+def _sandbox_kanban_worker_skills_read_only(cmd: list[str], env: dict[str, str]) -> list[str]:
+    """Mount every worker-visible skill tree read-only; no roots need no sandbox."""
+    roots = _kanban_worker_skill_roots(env)
+    if not roots:
+        return cmd
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError("Kanban skill write isolation requires Linux bubblewrap")
+    command = locate_command("bwrap").command
+    if not command:
+        raise RuntimeError("Kanban skill write isolation unavailable: bwrap not found")
+    bwrap = command[0]
+    wrapped = [
+        bwrap, "--unshare-pid", "--bind", "/", "/", "--dev-bind", "/dev", "/dev",
+        "--bind", "/run", "/run", "--ro-bind", "/sys", "/sys", "--proc", "/proc",
+    ]
+    for root in roots:
+        wrapped.extend(["--ro-bind", str(root), str(root)])
+    return [*wrapped, "--", *cmd]
+
+
 def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -> Optional[int]:
     """Fire-and-forget ``hermes -p <profile> chat -q ...`` subprocess.
 
@@ -2797,6 +2865,10 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     from gateway.session_context import _VAR_MAP
     for key in _VAR_MAP:
         env.pop(key, None)
+    for key in tuple(env):
+        if (key.startswith("HERMES_SESSION_") or key.startswith("HERMES_GATEWAY_")
+                or key in {"HERMES_UI_SESSION_ID", "_HERMES_GATEWAY"}):
+            env.pop(key, None)
 
     # Inject HERMES_HOME so the worker reads the profile-scoped config.yaml:
     # without it the child's get_hermes_home() falls back to the DEFAULT
@@ -2868,6 +2940,7 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     # external worker (#112729): applied to the sanitized env, after every other decision stands.
     from cron.scheduler_worker_env import pin_hermes_tree_on_pythonpath
     env = pin_hermes_tree_on_pythonpath(env, Path(__file__).resolve().parent.parent)
+    cmd = _sandbox_kanban_worker_skills_read_only(cmd, env)
     # A worker spawned by a managed systemd gateway must leave the gateway's
     # cgroup before startup; otherwise restarting the service kills the worker
     # that is performing the handoff.
