@@ -108,6 +108,25 @@
 - Crawler任务只能指定`crawler`执行，不在Runner/Cron/Kanban中钉模型、Provider或思考强度；
 - 不强制触发低频、发布、付费或当前暂停任务来完成升级验收。
 
+### 7.1 官方Skill跨Profile同步与锁定
+
+Profile彼此隔离；升级默认Home或源码，不等于命名Profile中的Bundled Skill已同步。每次升级必须：
+
+1. 用`hermes profile list`发现全部现行Profile，不写死数量；以已选定官方提交中的`skills/`和`optional-skills/`为唯一官方基线。
+2. 升级前记录两棵官方源码Skill树、各Profile `.bundled_manifest`和全部已安装Bundled Skill树的SHA-256与权限模式；只临时解锁本次需要更新的官方路径，不解锁自定义或Agent创建Skill。
+3. 升级后逐Profile按名称、规范相对路径和完整树哈希与本机官方源码比较。`hermes skills list-modified`只会与该Profile自己的manifest比较，不能证明manifest不是旧版。
+4. 对每个未被用户修改但已落后的Bundled Skill，使用官方恢复命令：
+
+   ```bash
+   hermes --profile <profile> skills reset <skill> --restore --yes
+   ```
+
+   `hermes skills opt-in --sync`只补种缺失项，不能作为既有副本已更新的证明。
+5. 只有每个Profile都满足“Bundled全集完整、规范路径正确、树哈希零差异、manifest完全一致、`skills list-modified --json`返回`[]`”才通过。
+6. 验证后重新锁定：已安装Bundled Skill及官方源码`skills/`、`optional-skills/`的目录`0555`，普通文件`0444`，原本可执行的脚本`0555`，各Profile `.bundled_manifest`为`0444`；不得因锁定清除脚本的执行位。这是同所有者权限锁，不是immutable保证；以后每次升级都必须显式解锁、同步、校验、再锁定。
+7. 锁定后逐Profile运行`config check`和`tools list`。
+8. Agent创建Skill与官方Skill分开治理。删除前必须扫描所有Hermes Cron定义及其现行Runner/Prompt，并扫描全部现行看板、全部状态的Kanban任务；仅零引用项可删。删除时同步清理`.usage.json`并失效`.skills_prompt_snapshot.json`，但保留Curator ledger及其仍引用的备份blob作为审计历史。
+
 ## 8. WeKnora与外部服务边界
 
 - WeKnora upstream、数据库、Monitor和测试代码遵守其独立授权；Hermes升级不得顺带修改。
