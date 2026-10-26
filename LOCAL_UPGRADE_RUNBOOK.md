@@ -47,11 +47,13 @@
 
 - 通用Node在新进程启动时从当前PM facts/PATH解析。
 - Cron、Kanban、MCP、Runner和systemd不得固定PM Node版本目录。
+- Gateway安装器若在base unit生成版本化Node/npm路径，必须改为facts驱动的稳定selector；同时检查base fragment、全部drop-in、`systemctl show`的有效环境和主进程`/proc/<pid>/environ`。被drop-in覆盖的版本化文本仍算待修复残留，不能只因当前有效PATH正确而忽略。
 - PM切换后，已运行进程不会自动换解释器；必须在授权范围内逐个冷启动并从`/proc`回读。
 
 ### 3.3 Browser
 
 - Browser Use/Harness只使用受管稳定Chrome selector；任务不得固定浏览器版本目录。
+- Browser runtime manifest是引擎路径、版本和SHA-256的唯一集中锁；Verifier必须读取manifest，不能再次写死Chrome、Lightpanda或Harness版本。manifest/facts/Receipt中的受管版本事实与消费者版本pin必须分开判定。
 - 每个Worker必须拥有独立进程、OS随机端口、user-data-dir、cache、Harness namespace和清理权。
 - 浏览器自动化UA从实际会话/运行时取得；纯HTTP采集器使用集中站点策略，不得在多个脚本散落版本号。
 - 验收包括真实导航、DOM操作、下载禁用、退出后端口/进程/Profile/cache零残留。
@@ -105,6 +107,8 @@
 - `.env`只存凭据，不保存PATH、Node、浏览器、Modal镜像等运行时选择；
 - Cron逐项检查owner、enabled/paused、schedule、delivery、Runner、cwd和运行时解析；
 - Kanban逐库执行SQLite检查，核对开放任务、父子依赖、assignee、workspace和运行时字段；
+- Cron验收必须分开报告当前定义/Runner错误与`last_error`、`last_failure`等历史证据；历史失败不能冒充当前结构错误，也不能在未真实成功执行时改写为成功。
+- Kanban必须动态枚举正式board和游离`kanban.db`，扫描任务、评论、事件、run和附件索引的全部状态；开放任务中的临时路径是执行风险，终态任务中的历史文本只作证据。
 - Crawler任务只能指定`crawler`执行，不在Runner/Cron/Kanban中钉模型、Provider或思考强度；
 - 不强制触发低频、发布、付费或当前暂停任务来完成升级验收。
 
@@ -153,6 +157,7 @@ Profile彼此隔离；升级默认Home或源码，不等于命名Profile中的Bu
 - 删除本地旧分支、stash、无继续用途的本地tag、reflog和不可达对象；
 - 自有Fork只保留正式分支和最终状态，删除旧Fork分支与历史tag；
 - 使用`--force-with-lease`等带租约方式发布，随后从远程回读分支和tag；
+- 使用`git ls-remote`回读自有Fork的全部branch/tag和官方annotated tag的对象及解引用提交；本地tag只允许保留能在官方origin找到的集合，禁止把官方tag误判为自有Fork残余。
 - 官方`origin`保持只读，不删除其分支、tag或祖先历史；
 - 不为了“同步”把稳定生产推进到未发布的官方main。
 
@@ -168,6 +173,7 @@ Profile彼此隔离；升级默认Home或源码，不等于命名Profile中的Bu
 - 无消费者的备份、测试缓存、下载、空数据库、临时文件、失效脚本和旧runtime；
 - credential-bearing `.env`备份在现行配置回读后安全删除，不保留副本；
 - 无进程、服务、任务、Session、Runner、恢复合同或冷启动依赖的可再生缓存。
+- UV interpreter缓存中指向已删除install/generation的记录、断链editable缓存、浏览器Singleton与旧Profile缓存、死亡Worker outbox、一次性控制器`__pycache__`、无owner的Node编译缓存、零字节包管理锁、已完成delegation/exec/spillover/terminal-output缓存，以及不存在unit对应的孤儿drop-in。
 
 保留：
 
@@ -177,6 +183,8 @@ Profile彼此隔离；升级默认Home或源码，不等于命名Profile中的Bu
 - 最终唯一紧凑Receipt。
 
 删除前检查进程`cmdline/cwd/exe/maps/fd`、systemd、Cron、Kanban、Session、配置、Runner和软链；删除后重复同一组检查。不得使用广泛Docker prune或通配符删除替代精确allowlist。
+
+UV清理不能只扫描editable `finder.py`：还必须解析interpreter cache记录、检查editable symlink目标、当前venv内`.pth`/finder及全部install/generation实体；只有失效缓存、旧引用和断链同时为零才可声明“零PM缓存残留”。所有独立审计者退出后，再清理其一次性日志和缓存并复扫；审计仍在运行时不能闭账。
 
 ## 12. 完成门槛
 
@@ -190,6 +198,8 @@ Profile彼此隔离；升级默认Home或源码，不等于命名Profile中的Bu
 - WeKnora和其他受保护业务保持规定状态，未发生未授权调用；
 - 本地Git与自有Fork收敛为唯一正式状态，官方origin未被改写；
 - Maintenance和全系统清理完成，二次扫描无无主残留；
+- 原始base unit、drop-in、有效systemd环境和进程环境四层均无消费者版本pin；Browser集中manifest与消费者引用分类正确；
+- Cron历史失败与当前定义分层记录，Kanban开放任务数及全部board/游离数据库扫描结果写入Receipt；
 - 历史测试结果、当前定向结果和未验证项表述准确；
 - `state.json`、`result.json`和唯一最终Receipt相互一致并已回读。
 
